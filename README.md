@@ -54,7 +54,10 @@ npm run wallet -- info
 
 To understand the code rather than just run it, read
 [docs/READ-IN-AN-AFTERNOON.md](docs/READ-IN-AN-AFTERNOON.md): six modules,
-four hours, an exercise each.
+four hours, an exercise each. To go deeper, the
+[paid course](https://behrouzbk.github.io/plainchain/#course) removes the
+key functions from this codebase and has you write them back, chapter by
+chapter, with the node's own tests as the judge.
 
 The step-by-step walkthrough with the expected output of every command —
 paying between two wallets, mining, replace-by-fee, light-client
