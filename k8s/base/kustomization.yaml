@@ -1,0 +1,18 @@
+# A three-node mesh of PlainChain on any Kubernetes cluster:
+#   kubectl apply -k k8s/base
+# Override the image for your registry/tag with
+#   cd k8s/base && kustomize edit set image ghcr.io/behrouzbk/plainchain=<image>:<tag>
+# and put a real RPC token in the secret (see README.md).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: l1
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - secret.yaml
+  - service-p2p.yaml
+  - service-rpc.yaml
+  - statefulset.yaml
+images:
+  - name: ghcr.io/behrouzbk/plainchain
+    newTag: main

@@ -1,0 +1,59 @@
+{
+  "networkId": "plainchain-devnet",
+  "genesis": {
+    "timestamp": 1700000000000,
+    "difficultyTarget": "0000ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "reward": "5000000000",
+    "genesisAddress": "devnet-genesis-allocation"
+  },
+  "monetary": {
+    "initialReward": "5000000000",
+    "halvingInterval": 210000,
+    "tailEmission": "0"
+  },
+  "consensus": {
+    "targetBlockTimeMs": 10000,
+    "difficultyRetargetInterval": 10,
+    "maxDifficultyAdjustmentFactor": 4,
+    "coinbaseMaturity": 10,
+    "maxFutureDriftMs": 7200000,
+    "checkpoints": [],
+    "maxBlockBytes": 1000000,
+    "maxTransactionsPerBlock": 5000,
+    "mode": "pow",
+    "authorities": []
+  },
+  "mempool": {
+    "minFee": "1",
+    "maxSize": 5000,
+    "maxReplacements": 100
+  },
+  "network": {
+    "defaultPort": 8001,
+    "handshakeTimeoutMs": 5000,
+    "maxInboundPeers": 32,
+    "maxOutboundPeers": 8,
+    "maxMessageBytes": 4194304,
+    "banThreshold": 100,
+    "banDurationMs": 600000,
+    "maxBlocksPerResponse": 500,
+    "maxHeadersPerResponse": 2000,
+    "peerMaintenanceIntervalMs": 30000,
+    "maxDialsPerTick": 4,
+    "maxAddressBookSize": 1000,
+    "peerDialBackoffMs": 10000,
+    "maxInboundPerIp": 0
+  },
+  "index": {
+    "addressIndex": true,
+    "addressIndexDepth": 0
+  },
+  "rpc": {
+    "bind": "127.0.0.1",
+    "rateLimit": {
+      "maxRequests": 200,
+      "windowMs": 10000
+    },
+    "trustProxy": 0
+  }
+}

@@ -1,0 +1,67 @@
+# Every pull request and every push to main: typecheck, the full test
+# suite, a production build, the Docker image (built, not pushed) and the
+# Kubernetes manifests (rendered). What `npm test` runs locally is exactly
+# what runs here -- there is no CI-only test set.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: typecheck, test, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  image:
+    name: docker image builds
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build (not pushed)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: plainchain:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: The image starts and answers /health
+        run: |
+          docker run -d --name n1 -e L1_RPC_ALLOW_INSECURE=true -e L1_RPC_TOKEN=ci -p 127.0.0.1:9001:9001 plainchain:ci
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:9001/health && break; sleep 1; done
+          curl -sf http://127.0.0.1:9001/health | grep -q '"status":"ok"'
+          docker rm -f n1
+
+  manifests:
+    name: kubernetes manifests render
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          kubectl kustomize k8s/base > /tmp/rendered.yaml
+          grep -q "kind: StatefulSet" /tmp/rendered.yaml
+          kubectl kustomize k8s/kind > /dev/null

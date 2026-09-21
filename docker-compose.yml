@@ -1,0 +1,78 @@
+# One-command local testnet: three nodes in a mesh.
+#
+#   docker compose up --build -d
+#   npm run testnet:check          # health, mine on node1, others converge
+#   docker compose logs -f
+#   docker compose down -v         # -v also wipes the chain data
+#
+# RPC is published on the host's loopback only (127.0.0.1:9001-9003), which
+# is why cleartext is allowed inside the containers. For TLS, generate certs
+# with `npm run testnet:tls` and add the overlay:
+#   docker compose -f docker-compose.yml -f docker-compose.tls.yml up --build -d
+#
+# Optional .env: L1_RPC_TOKEN, L1_MINER_ADDRESS (rewards on every node go to
+# it), L1_LOG_FORMAT=json, L1_LOG_LEVEL.
+
+x-node: &node
+  build: .
+  image: plainchain:local
+  restart: unless-stopped
+  environment: &node-env
+    L1_RPC_TOKEN: ${L1_RPC_TOKEN:-testnet-rpc-token}
+    L1_RPC_ALLOW_INSECURE: "true"
+    L1_MINER_ADDRESS: ${L1_MINER_ADDRESS:-}
+    L1_LOG_FORMAT: ${L1_LOG_FORMAT:-text}
+    L1_LOG_LEVEL: ${L1_LOG_LEVEL:-info}
+    # Every container has its own address on the compose network, so a
+    # per-address inbound cap is meaningful here (it is off by default for
+    # single-host devnets where all peers share 127.0.0.1).
+    L1_MAX_INBOUND_PER_IP: "4"
+
+services:
+  node1:
+    <<: *node
+    environment:
+      <<: *node-env
+      L1_NODE_ID: node1
+      L1_ADVERTISE_URL: ws://node1:8001
+    ports:
+      - "127.0.0.1:9001:9001"
+    volumes:
+      - node1-data:/data
+
+  node2:
+    <<: *node
+    environment:
+      <<: *node-env
+      L1_NODE_ID: node2
+      L1_ADVERTISE_URL: ws://node2:8001
+      L1_PEERS: ws://node1:8001
+    ports:
+      - "127.0.0.1:9002:9001"
+    volumes:
+      - node2-data:/data
+    depends_on:
+      node1:
+        condition: service_healthy
+
+  node3:
+    <<: *node
+    environment:
+      <<: *node-env
+      L1_NODE_ID: node3
+      L1_ADVERTISE_URL: ws://node3:8001
+      L1_PEERS: ws://node1:8001,ws://node2:8001
+    ports:
+      - "127.0.0.1:9003:9001"
+    volumes:
+      - node3-data:/data
+    depends_on:
+      node1:
+        condition: service_healthy
+      node2:
+        condition: service_healthy
+
+volumes:
+  node1-data:
+  node2-data:
+  node3-data:

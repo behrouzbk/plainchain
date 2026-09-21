@@ -1,0 +1,13 @@
+node_modules/
+dist/
+data/
+*.log
+coverage/
+.DS_Store
+testnet/tls/
+# owner-only material (kept in the private repository plainchain-internal)
+CLAUDE.md
+CLAUDE.local.md
+PLAN.md
+internal/
+k8s/gke/

@@ -1,0 +1,17 @@
+# Cluster-internal RPC endpoint, load-balanced over ready nodes: fine for
+# reads and sendRawTransaction. To talk to one specific node (e.g. `mine`),
+# port-forward the pod: kubectl -n l1 port-forward l1-node-0 9001:9001
+apiVersion: v1
+kind: Service
+metadata:
+  name: l1-node-rpc
+  labels:
+    app: l1-node
+spec:
+  type: ClusterIP
+  selector:
+    app: l1-node
+  ports:
+    - name: rpc
+      port: 9001
+      targetPort: rpc

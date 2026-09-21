@@ -1,0 +1,89 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: l1-node
+  labels:
+    app: l1-node
+spec:
+  serviceName: l1-node
+  replicas: 3
+  # Pods start in order and each waits for the previous to be ready, so a
+  # joiner's --peers are live when it dials (the same reason the compose
+  # file uses depends_on: service_healthy).
+  podManagementPolicy: OrderedReady
+  selector:
+    matchLabels:
+      app: l1-node
+  template:
+    metadata:
+      labels:
+        app: l1-node
+    spec:
+      # The image runs as the unprivileged `node` user (uid 1000); fsGroup
+      # makes the persistent volume writable by it.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      # Needed only when the image is private (see README.md); ignored if
+      # the secret does not exist and the image is public.
+      imagePullSecrets:
+        - name: ghcr-pull
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: node
+          image: ghcr.io/behrouzbk/plainchain
+          ports:
+            - name: p2p
+              containerPort: 8001
+            - name: rpc
+              containerPort: 9001
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: L1_NODE_ID
+              value: $(POD_NAME)
+            - name: L1_ADVERTISE_URL
+              value: ws://$(POD_NAME).l1-node:8001
+          envFrom:
+            - configMapRef:
+                name: l1-node
+            - secretRef:
+                name: l1-node
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: rpc
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: rpc
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi

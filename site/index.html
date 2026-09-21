@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PlainChain — a Layer 1 blockchain you can read in an afternoon</title>
+<meta name="description" content="A complete Layer 1 blockchain node in TypeScript with no blockchain SDKs: proof of work or proof of authority, UTXO ledger, SPV wallet, Docker and Kubernetes. Open source, Apache 2.0, 576 tests.">
+<meta property="og:title" content="PlainChain — a Layer 1 blockchain you can read in an afternoon">
+<meta property="og:description" content="Open-source Layer 1 node in TypeScript, built from Node's own crypto. Proof of work or proof of authority. 576 tests, a public threat model, Docker and Kubernetes.">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231f6f5f'/%3E%3Crect x='6' y='13' width='6' height='6' fill='white'/%3E%3Crect x='13' y='13' width='6' height='6' fill='white'/%3E%3Crect x='20' y='13' width='6' height='6' fill='white'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #fbfaf7; --fg: #1d1d1b; --muted: #5d5c57; --line: #e3e0d8;
+    --accent: #1f6f5f; --accent-fg: #ffffff; --card: #ffffff; --code: #f1efe8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #131413; --fg: #ebe9e2; --muted: #a09e96; --line: #2a2b29; --accent: #4fb39b; --accent-fg: #0f1a17; --card: #1b1c1a; --code: #202120; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 17px/1.6 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  a { color: var(--accent); }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 0 16px; }
+  header.top { display: flex; justify-content: space-between; align-items: center; padding: 18px 0; }
+  header.top .brand { font-weight: 700; text-decoration: none; color: var(--fg); }
+  header.top nav a { margin-left: 18px; text-decoration: none; color: var(--muted); font-size: 15px; }
+  .hero { padding: 48px 0 32px; }
+  .hero h1 { font-size: 2.4rem; line-height: 1.15; margin: 0 0 16px; letter-spacing: -0.01em; }
+  .hero p.lead { font-size: 1.2rem; color: var(--muted); max-width: 640px; margin: 0 0 24px; }
+  .cta a { display: inline-block; padding: 12px 20px; border-radius: 8px; text-decoration: none; font-weight: 600; margin: 0 10px 10px 0; }
+  .cta .primary { background: var(--accent); color: var(--accent-fg); }
+  .cta .secondary { border: 1px solid var(--line); color: var(--fg); background: var(--card); }
+  .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 28px 0 0; }
+  .facts div { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+  .facts b { display: block; font-size: 1.5rem; }
+  .facts span { color: var(--muted); font-size: 14px; }
+  section { padding: 36px 0; border-top: 1px solid var(--line); }
+  h2 { font-size: 1.5rem; margin: 0 0 14px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+  .card h3 { margin: 0 0 6px; font-size: 1.05rem; }
+  .card p { margin: 0; color: var(--muted); font-size: 15px; }
+  pre { background: var(--code); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; overflow-x: auto; font-size: 14px; line-height: 1.5; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  p code { background: var(--code); padding: 1px 5px; border-radius: 4px; font-size: 0.92em; }
+  .note { border-left: 3px solid var(--accent); padding: 8px 14px; background: var(--card); border-radius: 0 8px 8px 0; color: var(--muted); }
+  footer { padding: 28px 0 40px; color: var(--muted); font-size: 14px; border-top: 1px solid var(--line); }
+  @media (max-width: 600px) { .hero h1 { font-size: 1.8rem; } header.top nav a { margin-left: 12px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="top">
+  <a class="brand" href="#">PlainChain</a>
+  <nav>
+    <a href="#learn">Learn</a>
+    <a href="#run">Run</a>
+    <a href="#services">Services</a>
+    <a href="https://github.com/behrouzbk/plainchain">GitHub</a>
+  </nav>
+</header>
+
+<div class="hero">
+  <h1>A complete Layer&nbsp;1 blockchain you can read in an afternoon.</h1>
+  <p class="lead">PlainChain is a working blockchain node written from scratch in TypeScript — no blockchain SDKs, every hash and signature from Node's own <code>crypto</code>. Run it on a laptop, read every rule, and see the test that proves each one.</p>
+  <div class="cta">
+    <a class="primary" href="https://github.com/behrouzbk/plainchain/blob/main/docs/READ-IN-AN-AFTERNOON.md">Read the guide</a>
+    <a class="secondary" href="https://github.com/behrouzbk/plainchain">View on GitHub</a>
+  </div>
+  <div class="facts">
+    <div><b>576</b><span>automated tests, many of them explicit attacks</span></div>
+    <div><b>3</b><span>runtime dependencies</span></div>
+    <div><b>~17k</b><span>lines of TypeScript, readable in one sitting</span></div>
+    <div><b>55</b><span>threats in a public threat model, each tied to code and a test</span></div>
+  </div>
+</div>
+
+<section id="what">
+  <h2>What is inside</h2>
+  <div class="grid">
+    <div class="card"><h3>Two ways to make blocks</h3><p>Proof of work with fork-aware difficulty, or a Clique-style proof of authority where an approved set of signers take turns — the right choice for a group of companies sharing a ledger.</p></div>
+    <div class="card"><h3>A real ledger</h3><p>Bitcoin-style UTXO accounting, coinbase maturity, halving schedule, checkpoints, and crash-safe chain reorganisations.</p></div>
+    <div class="card"><h3>A real network</h3><p>Peer discovery, header-first sync, reputation and bans, and every message from a peer type-checked before the node looks at it.</p></div>
+    <div class="card"><h3>A real wallet</h3><p>12-word recovery phrases, multiple accounts, watch-only wallets, fee bumping, and a light client that verifies proofs itself instead of trusting the node.</p></div>
+    <div class="card"><h3>Ready to operate</h3><p>JSON-RPC with authentication, rate limiting and TLS; health and Prometheus metrics; JSON logs; Docker and Kubernetes packaging.</p></div>
+    <div class="card"><h3>Deliberately left out</h3><p>Smart contracts, a public token, transaction privacy. It is a ledger, not a platform.</p></div>
+  </div>
+</section>
+
+<section id="run">
+  <h2>Ten-minute start</h2>
+  <pre><code>git clone https://github.com/behrouzbk/plainchain.git
+cd plainchain
+npm ci
+npm test            # 576 tests, about three minutes
+npm run simulate    # three real node processes mine, propagate, and agree</code></pre>
+  <p>Then follow the <a href="https://github.com/behrouzbk/plainchain/blob/main/docs/HANDS-ON-TESTING.md">hands-on walkthrough</a>: create two wallets, mine, pay, bump a fee, and verify the payment with the light client — every command with its expected output. Three containers with <code>docker compose up</code>; the same mesh on Kubernetes with <code>kubectl apply -k k8s/base</code>.</p>
+</section>
+
+<section id="learn">
+  <h2>Learn how a blockchain actually works</h2>
+  <p>The free guide, <a href="https://github.com/behrouzbk/plainchain/blob/main/docs/READ-IN-AN-AFTERNOON.md"><strong>Read the whole chain in an afternoon</strong></a>, walks the six modules in the order they are built — crypto, ledger, state, consensus, network, RPC — with one test to run and one exercise for each: add a rule test-first, break and repair the UTXO set, change fork choice and watch the reorg tests fail, write an attack against a live node.</p>
+  <p>A <strong>self-paced course</strong> built on the same codebase is in preparation: guided lessons, exercise branches with automated checking, worked solutions, and a Q&amp;A channel. <a href="https://github.com/behrouzbk/plainchain/discussions">Follow the project on GitHub Discussions</a> to hear when it opens.</p>
+</section>
+
+<section id="how">
+  <h2>How it was built</h2>
+  <p>Test-first, with one rule at a time: every consensus or network rule was added together with a test showing the attack it prevents — an inflated coinbase, a forged seal, a double-spend, a peer claiming a block hash it did not earn. The <a href="https://github.com/behrouzbk/plainchain/blob/main/docs/THREAT-MODEL.md">threat model</a> lists about 55 such threats, each pointing at the code that stops it and the test that proves it, plus the risks that are accepted on purpose.</p>
+  <p class="note">Security status: internally audited with a public threat model; eight findings fixed. <strong>No independent security review yet</strong> — treat it as pre-audit software and do not put value you cannot afford to lose on a chain built with it. Vulnerabilities: see <a href="https://github.com/behrouzbk/plainchain/blob/main/SECURITY.md">SECURITY.md</a>.</p>
+</section>
+
+<section id="services">
+  <h2>Services</h2>
+  <div class="grid">
+    <div class="card"><h3>Solution architecture</h3><p>From a business problem to a design a team can build: data model, trust boundaries, deployment, operations, cost.</p></div>
+    <div class="card"><h3>Private-chain deployment</h3><p>A proof-of-authority network for your consortium — configured, integrated with your systems, documented, handed over running, with operator training.</p></div>
+    <div class="card"><h3>Workshops</h3><p>One or two days, live: your engineers run a network together and modify the rules. Understand the technology in days instead of months.</p></div>
+  </div>
+  <p style="margin-top:16px">Write to <a href="mailto:admin@lummana.com">admin@lummana.com</a> with a paragraph about the problem. <a href="https://lummana.com">Lummana</a>, Toronto.</p>
+</section>
+
+<footer>
+  PlainChain is open source under the <a href="https://github.com/behrouzbk/plainchain/blob/main/LICENSE">Apache License 2.0</a>. Formerly <em>l1-node-engine</em>.
+</footer>
+
+</div>
+</body>
+</html>

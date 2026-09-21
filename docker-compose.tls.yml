@@ -1,0 +1,31 @@
+# TLS overlay: RPC over HTTPS with per-node self-signed certificates from
+# `npm run testnet:tls` (testnet/tls/<node>/rpc-{cert,key}.pem, plus
+# testnet/tls/ca-bundle.pem holding all three certs for clients).
+#
+#   npm run testnet:tls
+#   docker compose -f docker-compose.yml -f docker-compose.tls.yml up --build -d
+#   L1_TESTNET_RPC_URLS=https://127.0.0.1:9001,https://127.0.0.1:9002,https://127.0.0.1:9003 \
+#   L1_RPC_CA=testnet/tls/ca-bundle.pem npm run testnet:check
+#
+# The generated keys are world-readable so the container's `node` user
+# (uid 1000) can read the bind mount on any host -- fine for a throwaway
+# testnet, not for a real deployment.
+
+x-tls-env: &tls-env
+  L1_RPC_TLS_CERT: /tls/rpc-cert.pem
+  L1_RPC_TLS_KEY: /tls/rpc-key.pem
+  L1_RPC_ALLOW_INSECURE: "false"
+
+services:
+  node1:
+    environment: *tls-env
+    volumes:
+      - ./testnet/tls/node1:/tls:ro
+  node2:
+    environment: *tls-env
+    volumes:
+      - ./testnet/tls/node2:/tls:ro
+  node3:
+    environment: *tls-env
+    volumes:
+      - ./testnet/tls/node3:/tls:ro

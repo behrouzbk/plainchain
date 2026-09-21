@@ -1,0 +1,17 @@
+# Headless: gives every pod a stable DNS name (l1-node-N.l1-node), which is
+# what peers dial and what each node advertises.
+apiVersion: v1
+kind: Service
+metadata:
+  name: l1-node
+  labels:
+    app: l1-node
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app: l1-node
+  ports:
+    - name: p2p
+      port: 8001
+      targetPort: p2p

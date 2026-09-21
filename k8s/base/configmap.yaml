@@ -1,0 +1,21 @@
+# Node settings shared by every replica. Every flag of `npm run node` is an
+# L1_* env var (src/node/settings.ts); per-pod values (node id, advertise
+# URL) are set in the StatefulSet from the pod name.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: l1-node
+data:
+  L1_LOG_FORMAT: json
+  L1_LOG_LEVEL: info
+  # RPC is only reachable inside the cluster (ClusterIP service, no
+  # Ingress), which is why cleartext is allowed. To expose it beyond the
+  # cluster, mount a certificate and set L1_RPC_TLS_CERT / L1_RPC_TLS_KEY
+  # instead of this (the node refuses cleartext on 0.0.0.0 otherwise).
+  L1_RPC_ALLOW_INSECURE: "true"
+  # Every pod has its own address, so a per-address inbound cap is meaningful.
+  L1_MAX_INBOUND_PER_IP: "4"
+  # Every replica dials the first two; a node's dial to itself is collapsed
+  # by the P2P layer and the address book keeps retrying peers that are
+  # still starting (see network/addressBook.ts).
+  L1_PEERS: ws://l1-node-0.l1-node:8001,ws://l1-node-1.l1-node:8001

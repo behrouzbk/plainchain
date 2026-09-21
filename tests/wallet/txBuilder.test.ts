@@ -1,0 +1,192 @@
+import { describe, expect, it } from "vitest";
+import { generateKeyPair } from "../../src/crypto/keypair.js";
+import { verify } from "../../src/crypto/signature.js";
+import { deriveAddress } from "../../src/ledger/address.js";
+import { computeTransactionId, getSigningPayload, validateTransactionStructure } from "../../src/ledger/transaction.js";
+import type { Unspent } from "../../src/state/utxoSet.js";
+import { bumpFee, buildTransaction, InsufficientFundsError, selectCoins } from "../../src/wallet/txBuilder.js";
+
+const kp = generateKeyPair();
+const me = deriveAddress(kp.publicKey);
+const bob = deriveAddress(generateKeyPair().publicKey);
+
+function utxo(txId: string, amount: bigint, extra: Partial<Unspent> = {}): Unspent {
+  return { txId, outputIndex: 0, address: me, amount, blockHeight: 1, isCoinbase: false, ...extra };
+}
+
+describe("wallet transaction builder", () => {
+  it("builds a signed transaction with a change output back to the sender", () => {
+    const tx = buildTransaction({
+      keyPair: kp,
+      unspent: [utxo("a", 100n)],
+      to: bob,
+      amount: 30n,
+      fee: 5n,
+      timestamp: 1234,
+      tipHeight: 10,
+      coinbaseMaturity: 0,
+    });
+
+    expect(tx.inputs).toHaveLength(1);
+    expect(tx.outputs).toEqual([
+      { address: bob, amount: 30n },
+      { address: me, amount: 65n },
+    ]);
+    expect(tx.fee).toBe(5n);
+    expect(tx.timestamp).toBe(1234);
+    expect(tx.id).toBe(computeTransactionId(tx));
+    expect(validateTransactionStructure(tx).valid).toBe(true);
+
+    const payload = getSigningPayload(tx);
+    for (const input of tx.inputs) {
+      expect(input.publicKey).toBe(kp.publicKey);
+      expect(verify(kp.publicKey, payload, input.signature)).toBe(true);
+    }
+  });
+
+  it("omits the change output when the inputs exactly cover amount + fee", () => {
+    const tx = buildTransaction({
+      keyPair: kp,
+      unspent: [utxo("a", 35n)],
+      to: bob,
+      amount: 30n,
+      fee: 5n,
+      timestamp: 1,
+      tipHeight: 10,
+      coinbaseMaturity: 0,
+    });
+    expect(tx.outputs).toEqual([{ address: bob, amount: 30n }]);
+  });
+
+  it("selects the fewest, largest coins deterministically and signs every one", () => {
+    const tx = buildTransaction({
+      keyPair: kp,
+      unspent: [utxo("small", 10n), utxo("big", 60n), utxo("mid", 40n)],
+      to: bob,
+      amount: 90n,
+      fee: 5n,
+      timestamp: 1,
+      tipHeight: 10,
+      coinbaseMaturity: 0,
+    });
+    expect(tx.inputs.map((i) => i.txId)).toEqual(["big", "mid"]);
+    expect(tx.outputs).toEqual([
+      { address: bob, amount: 90n },
+      { address: me, amount: 5n },
+    ]);
+    const payload = getSigningPayload(tx);
+    expect(tx.inputs.every((i) => verify(kp.publicKey, payload, i.signature))).toBe(true);
+  });
+
+  it("breaks amount ties by outpoint so two wallets with the same UTXOs build the same transaction", () => {
+    const a = selectCoins([utxo("z", 10n), utxo("a", 10n, { outputIndex: 1 }), utxo("a", 10n)], 15n);
+    expect(a.map((u) => `${u.txId}:${u.outputIndex}`)).toEqual(["a:0", "a:1"]);
+  });
+
+  it("throws InsufficientFundsError with the shortfall, without signing anything", () => {
+    let err: unknown;
+    try {
+      buildTransaction({
+        keyPair: kp,
+        unspent: [utxo("a", 10n)],
+        to: bob,
+        amount: 30n,
+        fee: 5n,
+        timestamp: 1,
+        tipHeight: 10,
+        coinbaseMaturity: 0,
+      });
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(InsufficientFundsError);
+    expect((err as InsufficientFundsError).available).toBe(10n);
+    expect((err as InsufficientFundsError).required).toBe(35n);
+  });
+
+  it("does not spend coinbase outputs that haven't matured yet, and counts them as unavailable", () => {
+    // Maturity 10: a coinbase created at height 5 is spendable from height 15,
+    // i.e. once the tip is at 14 (the tx would be mined at 15).
+    const unspent = [utxo("young", 100n, { isCoinbase: true, blockHeight: 5 }), utxo("plain", 40n)];
+    const build = (tipHeight: number) =>
+      buildTransaction({ keyPair: kp, unspent, to: bob, amount: 50n, fee: 1n, timestamp: 1, tipHeight, coinbaseMaturity: 10 });
+
+    expect(() => build(13)).toThrow(InsufficientFundsError);
+    try {
+      build(13);
+    } catch (e) {
+      expect((e as InsufficientFundsError).available).toBe(40n);
+      expect((e as InsufficientFundsError).immature).toBe(100n);
+    }
+    expect(build(14).inputs.map((i) => i.txId)).toEqual(["young"]);
+  });
+
+  it("refuses a non-positive amount or a negative fee before touching keys", () => {
+    const args = { keyPair: kp, unspent: [utxo("a", 100n)], to: bob, timestamp: 1, tipHeight: 1, coinbaseMaturity: 0 };
+    expect(() => buildTransaction({ ...args, amount: 0n, fee: 1n })).toThrow(/amount/i);
+    expect(() => buildTransaction({ ...args, amount: -5n, fee: 1n })).toThrow(/amount/i);
+    expect(() => buildTransaction({ ...args, amount: 5n, fee: -1n })).toThrow(/fee/i);
+  });
+
+  it("refuses to spend outputs that don't belong to the key pair (a wrong listUnspent result can't be signed for)", () => {
+    expect(() =>
+      buildTransaction({
+        keyPair: kp,
+        unspent: [utxo("a", 100n, { address: bob })],
+        to: bob,
+        amount: 10n,
+        fee: 1n,
+        timestamp: 1,
+        tipHeight: 1,
+        coinbaseMaturity: 0,
+      }),
+    ).toThrow(/not owned/i);
+  });
+});
+
+describe("bumpFee (replace-by-fee from the wallet side)", () => {
+  const original = buildTransaction({
+    keyPair: kp,
+    unspent: [utxo("a", 100n)],
+    to: bob,
+    amount: 30n,
+    fee: 5n,
+    timestamp: 1234,
+    tipHeight: 10,
+    coinbaseMaturity: 0,
+  });
+
+  it("re-signs the same payment with a higher fee taken from the change output", () => {
+    const bumped = bumpFee({ keyPair: kp, original, newFee: 12n, timestamp: 2345 });
+    expect(bumped.inputs.map((i) => [i.txId, i.outputIndex])).toEqual(original.inputs.map((i) => [i.txId, i.outputIndex]));
+    expect(bumped.outputs).toEqual([
+      { address: bob, amount: 30n },
+      { address: me, amount: 58n },
+    ]);
+    expect(bumped.fee).toBe(12n);
+    expect(bumped.id).not.toBe(original.id);
+    expect(bumped.id).toBe(computeTransactionId(bumped));
+    expect(validateTransactionStructure(bumped).valid).toBe(true);
+    const payload = getSigningPayload(bumped);
+    for (const input of bumped.inputs) expect(verify(kp.publicKey, payload, input.signature)).toBe(true);
+  });
+
+  it("drops the change output when the bump consumes it exactly", () => {
+    const bumped = bumpFee({ keyPair: kp, original, newFee: 70n, timestamp: 2345 });
+    expect(bumped.outputs).toEqual([{ address: bob, amount: 30n }]);
+    expect(bumped.fee).toBe(70n);
+  });
+
+  it("refuses a fee that is not higher, a bump the change cannot cover, and a transaction without change", () => {
+    expect(() => bumpFee({ keyPair: kp, original, newFee: 5n, timestamp: 1 })).toThrow(/higher than/);
+    expect(() => bumpFee({ keyPair: kp, original, newFee: 71n, timestamp: 1 })).toThrow(/change output .* only 65/);
+    const noChange = buildTransaction({ keyPair: kp, unspent: [utxo("a", 35n)], to: bob, amount: 30n, fee: 5n, timestamp: 1, tipHeight: 10, coinbaseMaturity: 0 });
+    expect(noChange.outputs).toHaveLength(1);
+    expect(() => bumpFee({ keyPair: kp, original: noChange, newFee: 6n, timestamp: 1 })).toThrow(/no change output/);
+  });
+
+  it("refuses to bump a transaction whose inputs are not signed by this key (cannot re-sign someone else's spend)", () => {
+    const other = generateKeyPair();
+    expect(() => bumpFee({ keyPair: other, original, newFee: 12n, timestamp: 1 })).toThrow(/not owned|not signed by/i);
+  });
+});

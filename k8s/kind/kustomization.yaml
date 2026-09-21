@@ -1,0 +1,13 @@
+# Local cluster (kind, minikube, Docker Desktop): the image built on this
+# machine instead of the registry.
+#   docker build -t plainchain:local .
+#   kind load docker-image plainchain:local --name l1
+#   kubectl apply -k k8s/kind
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../base
+images:
+  - name: ghcr.io/behrouzbk/plainchain
+    newName: plainchain
+    newTag: local

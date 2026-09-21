@@ -1,0 +1,10 @@
+node_modules
+dist
+data
+testnet
+docs
+tests
+.git
+*.log
+coverage
+site
