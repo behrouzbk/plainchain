@@ -26,7 +26,7 @@ together with a test showing the attack it prevents).
 
 ## 2. Scope
 
-- **Commit**: tag `v0.1.0` (`302fbe6`) unless the engagement names a later
+- **Commit**: tag `v0.1.1` (`54d0f5d`) unless the engagement names a later
   tag; the reviewer pins it in the report. `CHANGELOG.md` lists what
   changes between tags, so a fix made during the review is visible.
 - **In scope**: everything under `src/` and `scripts/`, the wire protocol,
