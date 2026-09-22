@@ -11,3 +11,7 @@ CLAUDE.local.md
 PLAN.md
 internal/
 k8s/gke/
+
+# Company website working copies (never part of the public repo)
+website/
+website-backup-*/
