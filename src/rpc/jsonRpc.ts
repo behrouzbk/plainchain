@@ -1,7 +1,7 @@
 import { AddressError, normalizeAddress } from "../ledger/address.js";
 import { parseWireTransaction } from "../ledger/serialize.js";
 import { MAX_TX_DATA_BYTES } from "../ledger/transaction.js";
-import { AddressIndexDisabledError, type Node } from "../node/node.js";
+import { AddressIndexDisabledError, AnchorFundsError, AnchorUnavailableError, type Node } from "../node/node.js";
 
 /** JSON-RPC 2.0 reserved codes plus this node's application range. */
 export const RpcErrorCode = {
@@ -152,15 +152,27 @@ function buildMethods(node: Node): Record<string, { params: string[]; handler: H
     getAnchors: {
       params: ["data", "limit"],
       handler: async (p) => {
-        const data = requireString(p, "data").toLowerCase();
-        if (!/^([0-9a-f]{2})+$/.test(data) || data.length / 2 > MAX_TX_DATA_BYTES) {
-          throw new JsonRpcError(RpcErrorCode.INVALID_PARAMS, `data must be hex, 1 to ${MAX_TX_DATA_BYTES} bytes (e.g. the sha256 of a document)`);
-        }
+        const data = requireRecord(p);
         const limit = p.limit === undefined ? 100 : p.limit;
         if (typeof limit !== "number" || !Number.isInteger(limit) || limit < 1 || limit > 1000) {
           throw new JsonRpcError(RpcErrorCode.INVALID_PARAMS, "limit must be an integer between 1 and 1000");
         }
         return node.getAnchors(data, limit);
+      },
+    },
+    anchorRecord: {
+      params: ["data"],
+      // Spends the operator's coins (the --anchor-key address).
+      requiresAuth: true,
+      handler: async (p) => {
+        const data = requireRecord(p);
+        try {
+          return await node.anchorRecord(data);
+        } catch (err) {
+          if (err instanceof AnchorUnavailableError) throw new JsonRpcError(RpcErrorCode.NOT_AVAILABLE, err.message);
+          if (err instanceof AnchorFundsError) throw new JsonRpcError(RpcErrorCode.TRANSACTION_REJECTED, err.message);
+          throw err;
+        }
       },
     },
     getSupply: {
@@ -202,6 +214,15 @@ function buildMethods(node: Node): Record<string, { params: string[]; handler: H
       },
     },
   };
+}
+
+/** A record (`data`) param: hex in either case, 1..MAX_TX_DATA_BYTES bytes, returned lower-cased as it is stored on chain. */
+function requireRecord(params: Params): string {
+  const data = requireString(params, "data").toLowerCase();
+  if (!/^([0-9a-f]{2})+$/.test(data) || data.length / 2 > MAX_TX_DATA_BYTES) {
+    throw new JsonRpcError(RpcErrorCode.INVALID_PARAMS, `data must be hex, 1 to ${MAX_TX_DATA_BYTES} bytes (e.g. the sha256 of a document)`);
+  }
+  return data;
 }
 
 /** An address param in either the checksummed or the raw form, as raw hex. */

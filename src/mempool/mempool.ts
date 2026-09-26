@@ -133,6 +133,11 @@ export class Mempool {
     return lowest;
   }
 
+  /** Whether a pending transaction already spends this outpoint. */
+  isClaimed(txId: string, outputIndex: number): boolean {
+    return this.claimedOutpoints.has(`${txId}:${outputIndex}`);
+  }
+
   has(txId: string): boolean {
     return this.transactions.has(txId);
   }

@@ -1,7 +1,7 @@
 import { parseArgs } from "../config/args.js";
 import { genesisConfigFrom, loadConfig, monetaryPolicyFrom, packageVersion } from "../config/index.js";
 import { generateKeyPair } from "../crypto/keypair.js";
-import { deriveAddress } from "../ledger/address.js";
+import { deriveAddress, encodeAddress } from "../ledger/address.js";
 import { resolveRpcToken } from "../rpc/auth.js";
 import { createRpcServer, listenRpc } from "../rpc/server.js";
 import { checkRpcExposure, loadTlsCredentials, TlsConfigError } from "../rpc/tls.js";
@@ -40,6 +40,10 @@ async function main(): Promise<void> {
     throw new Error("--signer-key is only meaningful with consensus.mode \"poa\" (this config runs proof of work)");
   }
 
+  // Record anchoring paid by this node (anchorRecord): a hot key the
+  // operator funds; any Ed25519 key file in the gen-authority format.
+  const anchorKey = settings.anchorKeyPath !== undefined ? readSignerKey(settings.anchorKeyPath) : undefined;
+
   const node = new Node({
     nodeId,
     networkId: config.networkId,
@@ -75,6 +79,7 @@ async function main(): Promise<void> {
       depth: settings.addrIndexDepth ?? config.index.addressIndexDepth,
     },
     signerKey,
+    anchorKey,
   });
 
   await node.start();
@@ -87,6 +92,10 @@ async function main(): Promise<void> {
         : `proof of authority: validating only (no --signer-key); ${config.consensus.authorities.length} authorities configured`,
       { mode: "poa", authorities: config.consensus.authorities.length, signer: signerKey?.publicKey },
     );
+  }
+  if (anchorKey) {
+    const anchorAddress = deriveAddress(anchorKey.publicKey);
+    log.info(`anchoring: anchorRecord fees are paid from ${encodeAddress(anchorAddress)}`, { anchorAddress });
   }
   log.info(`mining rewards go to ${minerAddress}`, {
     minerAddress,

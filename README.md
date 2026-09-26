@@ -24,7 +24,7 @@ review yet** (see [Security](#security)).
 | Ledger | UTXO accounting, coinbase maturity, crash-atomic reorganisations with undo records, reorg-safe transaction and address indexes (with optional pruning). |
 | Network | WebSocket gossip, header-first sync, peer discovery with a persisted address book, reputation and bans, per-address connection caps, every payload type-checked at the boundary. |
 | Mempool | Fee-ordered with eviction, full replace-by-fee. |
-| Record anchoring | Put a document's sha256 on chain in a transaction (up to 80 bytes of data) and prove later that it existed by the block's time. `getAnchors` over JSON-RPC; `wallet anchor` / `find-anchor`, which checks the proof itself instead of trusting the node. |
+| Record anchoring | Put a document's sha256 on chain in a transaction (up to 80 bytes of data) and prove later that it existed by the block's time. `getAnchors` / `anchorRecord` (the node pays) over JSON-RPC; `wallet anchor` / `find-anchor`, which checks the proof itself instead of trusting the node. |
 | Wallet | BIP-39 recovery phrases, SLIP-0010 accounts, checksummed addresses, watch-only files, fee bumping, transaction history, and an SPV light client that verifies headers and Merkle proofs itself. |
 | Operations | JSON-RPC 2.0 with bearer auth, rate limiting and TLS; `/health` and Prometheus `/metrics`; JSON logs; every setting as a flag or `L1_*` env var; Docker compose testnet; Kubernetes manifests. |
 

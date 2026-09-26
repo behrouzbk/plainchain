@@ -359,6 +359,7 @@ describe("JSON-RPC 2.0 endpoint (POST /rpc)", () => {
       peerCount: 0,
       consensusMode: "pow",
       addressIndex: { depth: 0, fromHeight: 0 },
+      anchoring: null,
     });
   });
 
@@ -639,5 +640,81 @@ describe("RPC auth (REST) and rate limiting", () => {
       body: JSON.stringify(batch.slice(0, 3)),
     });
     expect(smaller.status).toBe(200);
+  });
+});
+
+describe("JSON-RPC anchorRecord (node-paid anchoring)", () => {
+  const dirs: string[] = [];
+  const cleanups: (() => Promise<void>)[] = [];
+
+  afterEach(async () => {
+    for (const c of cleanups.splice(0)) await c();
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+
+  async function start(withAnchorKey: boolean): Promise<{ node: Node; call: (body: unknown, headers?: Record<string, string>) => Promise<any> }> {
+    const dir = mkdtempSync(join(tmpdir(), "l1-node-anchor-rpc-test-"));
+    dirs.push(dir);
+    const anchorKey = generateKeyPair();
+    const node = new Node({
+      nodeId: "anchor-rpc",
+      networkId: "test-net",
+      dataDir: dir,
+      port: 0,
+      genesis: { timestamp: 1700000000000, difficultyTarget: EASY_TARGET, reward: 5000000000n, genesisAddress: deriveAddress(anchorKey.publicKey) },
+      consensus: { targetBlockTimeMs: 10_000, difficultyRetargetInterval: 10, maxDifficultyAdjustmentFactor: 4, coinbaseMaturity: 0, maxFutureDriftMs: 2 * 60 * 60 * 1000 },
+      mempool: { maxSize: Infinity, minFee: 1n },
+      minerAddress: deriveAddress(generateKeyPair().publicKey),
+      blockReward: 5000000000n,
+      logger: { warn: () => {} },
+      anchorKey: withAnchorKey ? anchorKey : undefined,
+    });
+    await node.start();
+    const server = await new Promise<Server>((resolve) => {
+      const s = createRpcServer(node, TEST_RPC_OPTIONS).listen(0, () => resolve(s));
+    });
+    cleanups.push(async () => {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await node.stop();
+    });
+    const port = (server.address() as { port: number }).port;
+    const call = async (body: unknown, headers: Record<string, string> = {}) =>
+      (await fetch(`http://localhost:${port}/rpc`, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(body) })).json();
+    return { node, call };
+  }
+
+  it("needs the bearer token: it spends the operator's coins", async () => {
+    const { node, call } = await start(true);
+    const res = await call({ jsonrpc: "2.0", method: "anchorRecord", params: ["ab".repeat(32)], id: 1 });
+    expect(res.error.code).toBe(-32004);
+    expect(node.getMempoolTransactions()).toEqual([]);
+  });
+
+  it("anchors a record (any hex case), then reports it pending, then confirmed with its block", async () => {
+    const { node, call } = await start(true);
+    const record = "AB".repeat(32);
+    const first = await call({ jsonrpc: "2.0", method: "anchorRecord", params: [record], id: 1 }, AUTH);
+    expect(first.result).toEqual({ status: "pending", txId: expect.stringMatching(/^[0-9a-f]{64}$/) });
+    expect(node.getMempoolTransactions()[0]!.data).toBe(record.toLowerCase());
+    const again = await call({ jsonrpc: "2.0", method: "anchorRecord", params: { data: record.toLowerCase() }, id: 2 }, AUTH);
+    expect(again.result).toEqual(first.result);
+
+    const block = await node.mineBlock();
+    const done = await call({ jsonrpc: "2.0", method: "anchorRecord", params: [record], id: 3 }, AUTH);
+    expect(done.result).toEqual({ status: "confirmed", txId: first.result.txId, height: 1, blockHash: block.hash, blockTimestamp: block.header.timestamp, confirmations: 1 });
+  });
+
+  it("errors: no anchor key is -32005, a bad record is -32602, no free coins is -32000 naming the address", async () => {
+    const plain = await start(false);
+    expect((await plain.call({ jsonrpc: "2.0", method: "anchorRecord", params: ["ab"], id: 1 }, AUTH)).error.code).toBe(-32005);
+    expect((await plain.call({ jsonrpc: "2.0", method: "getInfo", id: 2 })).result.anchoring).toBeNull();
+
+    const { call } = await start(true);
+    expect((await call({ jsonrpc: "2.0", method: "anchorRecord", params: ["xyz"], id: 1 }, AUTH)).error.code).toBe(-32602);
+    await call({ jsonrpc: "2.0", method: "anchorRecord", params: ["01"], id: 2 }, AUTH);
+    const broke = await call({ jsonrpc: "2.0", method: "anchorRecord", params: ["02"], id: 3 }, AUTH);
+    const info = await call({ jsonrpc: "2.0", method: "getInfo", id: 4 });
+    expect(broke.error.code).toBe(-32000);
+    expect(broke.error.message).toContain(info.result.anchoring.address);
   });
 });
