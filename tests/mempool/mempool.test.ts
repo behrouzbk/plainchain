@@ -142,6 +142,16 @@ describe("Mempool", () => {
     expect(mempool.size()).toBe(0);
   });
 
+  it("reports which outpoints pending transactions spend (what a node's own coin selection must skip)", async () => {
+    expect(mempool.isClaimed(cb.id, 0)).toBe(false);
+    const tx = spend(alice, { txId: cb.id, outputIndex: 0 }, [{ address: bobAddress, amount: 900n }], 100n);
+    await mempool.addTransaction(tx);
+    expect(mempool.isClaimed(cb.id, 0)).toBe(true);
+    expect(mempool.isClaimed(cb.id, 1)).toBe(false);
+    mempool.remove(tx.id);
+    expect(mempool.isClaimed(cb.id, 0)).toBe(false);
+  });
+
   it("rejects spending an immature coinbase output when a spendingHeight and coinbaseMaturity are configured", async () => {
     const matureUtxoSet = new UtxoSet(db.utxo, 10);
     const matureMempool = new Mempool(matureUtxoSet);

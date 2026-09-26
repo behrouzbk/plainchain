@@ -149,7 +149,9 @@ headers alone, so header-first sync and the light client apply them too.
 A transaction may carry up to 80 bytes of record data (`Transaction.data`,
 usually the sha256 of a document). The node indexes it (`anchors`
 sublevel) and answers `getAnchors`; `wallet find-anchor` proves an anchor
-without trusting the node. `RULES_VERSION` 5.
+without trusting the node. `RULES_VERSION` 5. A node started with
+`--anchor-key` also answers `anchorRecord`, signing and paying for the
+anchor itself (D8, D9).
 
 | # | Threat | M | T | R |
 |---|---|---|---|---|
@@ -160,6 +162,8 @@ without trusting the node. `RULES_VERSION` 5.
 | D5 | **Record dropped in transit** (a peer strips the field, so an honest transaction looks forged and its sender is penalized) | `network/wireShapes.ts#parseP2PTransaction` and `ledger/serialize.ts` carry and type-check `data` | `protocol: "a transaction's record data survives the trip…"`; `node: "a record reaches peers intact and is indexed there too"` | None known |
 | D6 | **Anchor in an abandoned block still reported** after a reorg | the anchor index is written in the same atomic adoption batch as the tx index: added on connect, removed on disconnect | `node: "follows reorgs: an anchor in an abandoned block disappears and returns when re-mined"` | None known |
 | D7 | **Backdated anchor**: the block producer sets an early block time | block time must be later than the parent's and at most `maxFutureDriftMs` ahead (C8) | `blockValidator: "rejects timestamps not after the parent's, or too far in the future"` | **R24** A block's time can be earlier than the real time by up to the gap since its parent (a miner, or a proof-of-authority signer, picks it). "Existed by block time" is as strong as the producers are honest; later blocks confirm it is not rewritten |
+| D8 | **Draining the anchor key** (anyone who can reach RPC makes the node pay fees) | `anchorRecord` requires the bearer token (`requiresAuth`), like `mine`; it is rate limited like every call; each anchor pays only the minimum fee, and change returns to the anchor address | `rpc/server: "needs the bearer token: it spends the operator's coins"` | **R25** A token holder can spend the anchor address's balance on fees, one minimum fee per distinct record. The key is read unencrypted at startup (a hot key, like `--signer-key`); keep only what fees need on it |
+| D9 | **Paying twice for one record** (a client retries after a timeout; concurrent calls pick the same coin and replace each other) | `node#anchorRecord` returns a confirmed or a pending anchor of the same record from the same key instead of paying again; coin selection skips coins pending transactions spend (`mempool#isClaimed`) and runs under the chain lock | `node: "a retried request for a pending record returns the same transaction instead of paying twice"`; `node: "splits its change into a pool of coins, so many records can be anchored in the next block, even concurrently"` | None known |
 
 ## 5. What is deliberately public
 

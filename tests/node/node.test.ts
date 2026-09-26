@@ -19,7 +19,7 @@ import { sign } from "../../src/crypto/signature.js";
 import { deriveAddress } from "../../src/ledger/address.js";
 import { computeTransactionId, getSigningPayload } from "../../src/ledger/transaction.js";
 import type { Block, BlockHeader, Transaction, UnsignedTransactionBody } from "../../src/ledger/types.js";
-import { AddressIndexDisabledError, Node, type NodeOptions } from "../../src/node/node.js";
+import { AddressIndexDisabledError, AnchorUnavailableError, Node, type NodeOptions } from "../../src/node/node.js";
 import { P2PServer } from "../../src/network/p2pServer.js";
 import type { Message } from "../../src/network/protocol.js";
 import { serializeBlock } from "../../src/ledger/serialize.js";
@@ -72,6 +72,7 @@ async function makeNode(
     consensus?: Partial<NodeOptions["consensus"]>;
     addressIndex?: NodeOptions["addressIndex"];
     signerKey?: NodeOptions["signerKey"];
+    anchorKey?: NodeOptions["anchorKey"];
   } = {},
 ): Promise<Node> {
   const dataDir = overrides.dataDir ?? mkdtempSync(join(tmpdir(), `l1-node-test-${nodeId}-`));
@@ -93,6 +94,7 @@ async function makeNode(
     monetary: overrides.monetary,
     addressIndex: overrides.addressIndex,
     signerKey: overrides.signerKey,
+    anchorKey: overrides.anchorKey,
   });
   await node.start();
   return node;
@@ -2790,5 +2792,90 @@ describe("Node record anchoring", () => {
     const result = await node.submitTransaction(anchorTx(genesisMiner, genesis.transactions[0]!.id, "00".repeat(81)));
     expect(result.valid).toBe(false);
     expect(result.reason).toMatch(/data/);
+  });
+});
+
+describe("Node anchorRecord (the node pays for anchors with --anchor-key)", () => {
+  const dirs: string[] = [];
+  const nodes: Node[] = [];
+  const record = (label: string) => sha256(`document ${label}`);
+
+  afterEach(async () => {
+    await Promise.all(nodes.splice(0).map((n) => n.stop()));
+    for (const dir of dirs.splice(0)) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  /** A node whose genesis pays the anchor key, so it has one confirmed coin to start. */
+  async function anchoringNode(): Promise<{ node: Node; anchorKey: { publicKey: string; privateKey: string } }> {
+    const anchorKey = generateKeyPair();
+    const node = await makeNode("anchoring", dirs, deriveAddress(anchorKey.publicKey), { anchorKey });
+    nodes.push(node);
+    return { node, anchorKey };
+  }
+
+  it("refuses when the node has no anchor key", async () => {
+    const node = await makeNode("plain", dirs, "g".repeat(64));
+    nodes.push(node);
+    await expect(node.anchorRecord(record("a"))).rejects.toThrow(AnchorUnavailableError);
+    expect((await node.getInfo()).anchoring).toBeNull();
+  });
+
+  it("signs and submits an anchor paid by the anchor key; after mining the same call reports it confirmed without paying again", async () => {
+    const { node, anchorKey } = await anchoringNode();
+    expect((await node.getInfo()).anchoring).toEqual({ address: deriveAddress(anchorKey.publicKey) });
+
+    const pending = await node.anchorRecord(record("a"));
+    expect(pending.status).toBe("pending");
+    const tx = node.getMempoolTransactions().find((t) => t.id === pending.txId)!;
+    expect(tx.data).toBe(record("a"));
+    expect(tx.inputs.every((i) => i.publicKey === anchorKey.publicKey)).toBe(true);
+    expect(tx.outputs.every((o) => o.address === deriveAddress(anchorKey.publicKey))).toBe(true);
+
+    const block = await node.mineBlock();
+    const confirmed = await node.anchorRecord(record("a"));
+    expect(confirmed).toEqual({ status: "confirmed", txId: pending.txId, height: 1, blockHash: block.hash, blockTimestamp: block.header.timestamp, confirmations: 1 });
+    expect(node.getMempoolTransactions()).toEqual([]);
+  });
+
+  it("a retried request for a pending record returns the same transaction instead of paying twice", async () => {
+    const { node } = await anchoringNode();
+    const first = await node.anchorRecord(record("a"));
+    const again = await node.anchorRecord(record("a"));
+    expect(again).toEqual(first);
+    expect(node.getMempoolTransactions()).toHaveLength(1);
+  });
+
+  it("splits its change into a pool of coins, so many records can be anchored in the next block, even concurrently", async () => {
+    const { node, anchorKey } = await anchoringNode();
+    await node.anchorRecord(record("first"));
+    // The only confirmed coin is now spent by a pending transaction:
+    // a second record has to wait for a block.
+    await expect(node.anchorRecord(record("second"))).rejects.toThrow(/no free confirmed coins/);
+    await node.mineBlock();
+    const pool = await node.listUnspent(deriveAddress(anchorKey.publicKey));
+    expect(pool.length).toBeGreaterThanOrEqual(8);
+
+    const labels = ["b", "c", "d", "e", "f", "g", "h", "i"];
+    const results = await Promise.all(labels.map((l) => node.anchorRecord(record(l))));
+    expect(new Set(results.map((r) => r.txId)).size).toBe(labels.length);
+    const block = await node.mineBlock();
+    expect(block.transactions).toHaveLength(labels.length + 1);
+    for (const l of labels) expect((await node.getAnchors(record(l)))[0]!.blockHash).toBe(block.hash);
+  });
+
+  it("an unfunded anchor key fails with the address to fund", async () => {
+    const anchorKey = generateKeyPair();
+    const node = await makeNode("unfunded", dirs, "g".repeat(64), { anchorKey });
+    nodes.push(node);
+    await expect(node.anchorRecord(record("a"))).rejects.toThrow(deriveAddress(anchorKey.publicKey));
+  });
+
+  it("refuses a record that could never be anchored, before touching coins", async () => {
+    const { node } = await anchoringNode();
+    await expect(node.anchorRecord("00".repeat(81))).rejects.toThrow(/data/);
+    await expect(node.anchorRecord("ABCD")).rejects.toThrow(/data/);
+    expect(node.getMempoolTransactions()).toEqual([]);
   });
 });

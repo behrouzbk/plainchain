@@ -22,6 +22,7 @@
     "simulate": "tsx scripts/simulate.ts",
     "gen-cert": "tsx scripts/genCert.ts",
     "gen-authority": "tsx scripts/genAuthority.ts",
+    "gen-anchor-key": "tsx scripts/genAnchorKey.ts",
     "testnet:check": "tsx scripts/testnetCheck.ts",
     "healthcheck": "tsx scripts/healthcheck.ts",
     "testnet:tls": "tsx scripts/testnetTls.ts",

@@ -41,6 +41,12 @@ describe("resolveNodeSettings", () => {
     expect(resolveNodeSettings({}, { L1_SIGNER_KEY: "/keys/a.key" }, defaults).signerKeyPath).toBe("/keys/a.key");
   });
 
+  it("reads --anchor-key / L1_ANCHOR_KEY as the key file that pays for anchorRecord", () => {
+    expect(resolveNodeSettings({}, {}, defaults).anchorKeyPath).toBeUndefined();
+    expect(resolveNodeSettings({ "anchor-key": "data/n1/anchor.key" }, {}, defaults).anchorKeyPath).toBe("data/n1/anchor.key");
+    expect(resolveNodeSettings({}, { L1_ANCHOR_KEY: "/keys/anchor.key" }, defaults).anchorKeyPath).toBe("/keys/anchor.key");
+  });
+
   it("reads --addrindex-depth / L1_ADDRINDEX_DEPTH and --no-addrindex / L1_NO_ADDRINDEX", () => {
     expect(resolveNodeSettings({}, {}, defaults).addrIndexDepth).toBeUndefined();
     expect(resolveNodeSettings({}, {}, defaults).noAddrIndex).toBe(false);

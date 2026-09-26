@@ -18,6 +18,12 @@ it; existing data directories and genesis stay valid).
   its merkle proof against SPV-verified headers instead of trusting the
   node. `bump` keeps the record. Guide: `docs/ANCHORING.md`; threat model
   §4.8.
+- **Node-paid anchoring.** `--anchor-key <file>` (`L1_ANCHOR_KEY`; create
+  one with `npm run gen-anchor-key`) lets a node sign and pay for anchors:
+  JSON-RPC `anchorRecord(data)` (bearer token) returns `pending` or
+  `confirmed` and never pays twice for one record. The node keeps a pool
+  of coins so many records fit in one block. `getInfo.anchoring` shows the
+  address to fund; metric `l1_anchor_requests_total{outcome}`.
 
 ## v0.1.1 — 2026-09-21
 

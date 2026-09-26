@@ -1,7 +1,9 @@
 import { computeBlockHash, createGenesisBlock, genesisAllocationTotal, type GenesisConfig } from "../ledger/block.js";
 import { serializeTransaction } from "../ledger/serialize.js";
 import { merkleProof, merkleRoot, type MerkleProof } from "../crypto/merkle.js";
-import { computeTransactionId, validateTransactionStructure } from "../ledger/transaction.js";
+import { computeTransactionId, MAX_TX_DATA_BYTES, validateTransactionStructure } from "../ledger/transaction.js";
+import { deriveAddress } from "../ledger/address.js";
+import { buildAnchorTransaction, InsufficientFundsError } from "../wallet/txBuilder.js";
 import type { Block, BlockHeader, Transaction } from "../ledger/types.js";
 import {
   DEFAULT_MAX_BLOCK_BYTES,
@@ -120,7 +122,14 @@ export interface ChainInfo {
   consensusMode: ConsensusMode;
   /** What `listTransactions` can answer: history from `fromHeight` up (depth 0 = the whole chain), or null when the node keeps no address index. */
   addressIndex: { depth: number; fromHeight: number } | null;
+  /** The address that pays for `anchorRecord` (fund it), or null when the node has no `--anchor-key`. */
+  anchoring: { address: string } | null;
 }
+
+/** What `anchorRecord` did: submitted (or found) a pending anchor, or found the record already confirmed. */
+export type AnchorRecordResult =
+  | { status: "pending"; txId: string }
+  | ({ status: "confirmed" } & Anchor & { confirmations: number });
 
 /**
  * Address-index (wallet history) policy. The index grows with every output
@@ -134,6 +143,16 @@ export interface AddressIndexOptions {
 }
 
 /** `listTransactions` on a node started with `--no-addrindex`. */
+/** `anchorRecord` on a node started without `--anchor-key`. */
+export class AnchorUnavailableError extends Error {
+  constructor() {
+    super("this node has no anchor key (start it with --anchor-key <file>); send a signed transaction with sendRawTransaction instead");
+  }
+}
+
+/** `anchorRecord` could not be paid for: no free confirmed coins at the anchor address. */
+export class AnchorFundsError extends Error {}
+
 export class AddressIndexDisabledError extends Error {
   constructor() {
     super("this node keeps no address index (started with --no-addrindex); transaction history is unavailable");
@@ -174,10 +193,24 @@ export interface NodeOptions {
   addressIndex?: AddressIndexOptions;
   /** Proof of authority: this node's own authority key (`--signer-key`). Without it the node validates but cannot produce blocks. */
   signerKey?: KeyPair;
+  /**
+   * Record anchoring paid by the node (`--anchor-key`): `anchorRecord`
+   * signs anchor transactions with this key, spending coins the operator
+   * sent to its address. A hot key: keep only what fees need on it.
+   */
+  anchorKey?: KeyPair;
 }
 
 export class Node {
   private static readonly MAX_ORPHANS = 50;
+  /**
+   * Confirmed coins the anchor key tries to keep free. Pending change can't
+   * be spent, so each free coin is one anchor per block; an anchor that
+   * leaves fewer free coins splits its change (at most
+   * ANCHOR_MAX_SPLIT pieces) to refill the pool by the next block.
+   */
+  private static readonly ANCHOR_COIN_POOL = 16;
+  private static readonly ANCHOR_MAX_SPLIT = 8;
   private static readonly DEFAULT_MAX_BLOCKS_PER_RESPONSE = 500;
   private static readonly DEFAULT_MAX_HEADERS_PER_RESPONSE = 2000;
   private static readonly DEFAULT_PEER_MAINTENANCE_INTERVAL_MS = 30_000;
@@ -256,6 +289,7 @@ export class Node {
     peerDials: Counter;
     miningAttempts: Counter;
     addrIndexPruned: Counter;
+    anchorRequests: Counter;
   };
 
   private readonly addressIndexEnabled: boolean;
@@ -375,6 +409,7 @@ export class Node {
       peerDials: m.counter("l1_peer_dials_total", "Outbound dial attempts by outcome.", ["outcome"]),
       miningAttempts: m.counter("l1_mining_attempts_total", "Block searches by outcome: mined, aborted (tip moved), stale (solved too late).", ["outcome"]),
       addrIndexPruned: m.counter("l1_address_index_pruned_total", "Address-index entries deleted because they fell outside --addrindex-depth."),
+      anchorRequests: m.counter("l1_anchor_requests_total", "anchorRecord calls by outcome: created, pending (already submitted), confirmed (already anchored), refused.", ["outcome"]),
     };
   }
 
@@ -759,7 +794,72 @@ export class Node {
       peerCount: this.p2pServer.getPeerIds().length,
       consensusMode: this.engine.mode,
       addressIndex: this.addressIndexEnabled ? { depth: this.addressIndexDepth, fromHeight: this.addressIndexFloor(tip?.height ?? 0) } : null,
+      anchoring: this.options.anchorKey ? { address: deriveAddress(this.options.anchorKey.publicKey) } : null,
     };
+  }
+
+  /**
+   * Anchors `data` paid by the node's anchor key, for clients that should
+   * not hold keys. Idempotent, so a retried request never pays twice: a
+   * record already confirmed, or pending from this key, is returned as is.
+   * Coin selection and mempool admission run under the chain lock, so
+   * concurrent calls never pick the same coin.
+   */
+  async anchorRecord(data: string): Promise<AnchorRecordResult> {
+    const key = this.options.anchorKey;
+    if (!key) throw new AnchorUnavailableError();
+    if (!/^([0-9a-f]{2})+$/.test(data) || data.length / 2 > MAX_TX_DATA_BYTES) {
+      this.counters.anchorRequests.inc(1, { outcome: "refused" });
+      throw new Error(`data must be lowercase hex, 1 to ${MAX_TX_DATA_BYTES} bytes`);
+    }
+    const address = deriveAddress(key.publicKey);
+
+    const outcome = await this.withChainLock(async (): Promise<{ result: AnchorRecordResult; tx?: Transaction; admission?: MempoolResult }> => {
+      const [confirmed] = await this.getAnchors(data, 1);
+      if (confirmed) return { result: { status: "confirmed", ...confirmed } };
+      const pending = this.mempool.getTransactions().find((t) => t.data === data && t.inputs.every((i) => i.publicKey === key.publicKey));
+      if (pending) return { result: { status: "pending", txId: pending.id } };
+
+      const spendingHeight = await this.nextSpendingHeight();
+      const free = (await this.utxoSet.listUnspent(address)).filter((u) => !this.mempool.isClaimed(u.txId, u.outputIndex));
+      const fee = this.options.mempool.minFee;
+      let tx: Transaction;
+      try {
+        tx = buildAnchorTransaction({
+          keyPair: key,
+          unspent: free,
+          data,
+          fee,
+          timestamp: Date.now(),
+          tipHeight: spendingHeight - 1,
+          coinbaseMaturity: this.options.consensus.coinbaseMaturity,
+          changeSplit: Math.min(Node.ANCHOR_MAX_SPLIT, Math.max(1, Node.ANCHOR_COIN_POOL - (free.length - 1))),
+        });
+      } catch (err) {
+        if (err instanceof InsufficientFundsError) {
+          throw new AnchorFundsError(
+            `no free confirmed coins at the anchor address ${address} (${err.message}). ` +
+              "Coins spent by pending anchors return after the next block; to anchor more per block, send more coins to that address",
+          );
+        }
+        throw err;
+      }
+      const admission = await this.mempool.addTransaction(tx, spendingHeight);
+      if (!admission.valid) throw new Error(`anchor transaction refused: ${admission.reason}`);
+      return { result: { status: "pending", txId: tx.id }, tx, admission };
+    }).catch((err: unknown) => {
+      this.counters.anchorRequests.inc(1, { outcome: "refused" });
+      throw err;
+    });
+
+    if (outcome.tx && outcome.admission) {
+      this.recordAdmission(outcome.tx, outcome.admission);
+      this.p2pServer.broadcast({ type: "NEW_TX", payload: { transaction: outcome.tx } });
+      this.counters.anchorRequests.inc(1, { outcome: "created" });
+    } else {
+      this.counters.anchorRequests.inc(1, { outcome: outcome.result.status });
+    }
+    return outcome.result;
   }
 
   async getSupply(): Promise<SupplyInfo> {

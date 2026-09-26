@@ -30,6 +30,8 @@ export interface NodeSettings {
   noAddrIndex: boolean;
   /** --signer-key / L1_SIGNER_KEY: file holding this node's proof-of-authority key. */
   signerKeyPath?: string;
+  /** --anchor-key / L1_ANCHOR_KEY: file holding the key that pays for anchorRecord. */
+  anchorKeyPath?: string;
   logFormat: LogFormat;
   logLevel: LogLevel;
 }
@@ -133,6 +135,7 @@ export function resolveNodeSettings(flags: Flags, env: Env, defaults: SettingsDe
     addrIndexDepth: nonNegativeInt("addrindex-depth"),
     noAddrIndex: bool("no-addrindex"),
     signerKeyPath: str("signer-key"),
+    anchorKeyPath: str("anchor-key"),
     logFormat,
     logLevel,
   };

@@ -24,6 +24,12 @@ export interface BuildTransactionArgs extends SpendArgs {
 export interface BuildAnchorArgs extends SpendArgs {
   /** The record to anchor, lowercase hex (typically a sha256 of a document). */
   data: string;
+  /**
+   * Split the change into up to this many coins (default 1). A node that
+   * anchors for its clients uses it to keep a pool of confirmed coins:
+   * unconfirmed change can't be spent, so one coin means one anchor per block.
+   */
+  changeSplit?: number;
 }
 
 export class InsufficientFundsError extends Error {
@@ -96,11 +102,11 @@ export function buildAnchorTransaction(args: BuildAnchorArgs): Transaction {
   if (!/^([0-9a-f]{2})+$/.test(args.data)) throw new Error("data must be non-empty lowercase hex");
   if (args.data.length / 2 > MAX_TX_DATA_BYTES) throw new Error(`data is ${args.data.length / 2} bytes, more than the ${MAX_TX_DATA_BYTES}-byte limit`);
   if (args.fee < 0n) throw new Error(`fee must be non-negative, got ${args.fee}`);
-  return buildSigned(args, [], 1n, args.data);
+  return buildSigned(args, [], 1n, args.data, args.changeSplit ?? 1);
 }
 
 /** Selects coins for `payments` + fee (+ `minChange`), adds change, signs every input. */
-function buildSigned(args: SpendArgs, payments: TxOutput[], minChange: bigint, data?: string): Transaction {
+function buildSigned(args: SpendArgs, payments: TxOutput[], minChange: bigint, data?: string, changeSplit = 1): Transaction {
   const { keyPair, fee, timestamp, tipHeight, coinbaseMaturity } = args;
   const ownAddress = deriveAddress(keyPair.publicKey);
   const foreign = args.unspent.find((u) => u.address !== ownAddress);
@@ -125,7 +131,11 @@ function buildSigned(args: SpendArgs, payments: TxOutput[], minChange: bigint, d
   const inputTotal = chosen.reduce((s, u) => s + u.amount, 0n);
   const outputs: TxOutput[] = [...payments];
   const change = inputTotal - required;
-  if (change > 0n) outputs.push({ address: ownAddress, amount: change });
+  // Equal pieces, remainder on the last; never a zero-value coin.
+  const pieces = change > 0n ? (BigInt(Math.max(1, changeSplit)) < change ? BigInt(Math.max(1, changeSplit)) : change) : 0n;
+  for (let i = 0n; i < pieces; i++) {
+    outputs.push({ address: ownAddress, amount: i === pieces - 1n ? change - (change / pieces) * (pieces - 1n) : change / pieces });
+  }
 
   const unsignedInputs: TxInput[] = chosen.map((u) => ({
     txId: u.txId,

@@ -243,6 +243,7 @@ positional or named params; bigints returned as decimal strings.
 | `listUnspent` | `address` | public |
 | `listTransactions` | `address, limit` | public |
 | `getAnchors` | `data, limit` | public — confirmed transactions carrying the record, oldest first |
+| `anchorRecord` | `data` | **bearer token** — the node signs and pays for the anchor with `--anchor-key`; idempotent (`pending` / `confirmed`) |
 | `getSupply` | — | public |
 | `getMempool` | — | public |
 | `sendRawTransaction` | `transaction` (wire format) | public — must carry valid signatures |
@@ -328,7 +329,8 @@ external step, with `docs/THREAT-MODEL.md` §8 as the brief.
 | Pluggable consensus (PoA) | | merged | `ConsensusEngine` (`consensus/engine.ts`) behind `validateHeader`, fork choice and `mineBlock`; `PoaEngine`: signed headers (signer in the hash), Clique-style once-per-floor(n/2)+1 rule, in-turn weight; mode + ordered authority set in the rules hash; `--signer-key`, `npm run gen-authority`, `--config` for a chain's own config; SPV verifies signed chains from a trusted authority set. |
 | CI + published image + Kubernetes | | merged | GitHub Actions: typecheck + full suite + build, image build-and-boot, manifests rendered, on every PR; `ghcr.io/behrouzbk/plainchain` published on pushes to main and semver tags (tag must match `package.json`); `k8s/base` StatefulSet mesh (headless peer DNS, per-pod PVC, health probes, non-root) + `k8s/kind` overlay; live-verified on kind with `testnet:check` and a pod restart. |
 | Address-index pruning | | merged | `--addrindex-depth n` keeps exactly the last n canonical blocks of wallet history (pruning rides in the adoption batch as the disconnect path; reorg-safe because deletes are idempotent), `--no-addrindex` keeps none; a changed depth is reconciled at startup (sweep or rebuild from the tx index); `getInfo.addressIndex` tells wallets what history covers and `wallet history` says so. |
-| Record anchoring | | in review | Optional `data` field on transactions (≤ 80 bytes, signed, in the id; `RULES_VERSION` 5); reorg-safe `anchors` index; `getAnchors` RPC; `wallet anchor` / `find-anchor` (re-hashes the transaction, checks the merkle proof against SPV headers); `docs/ANCHORING.md`; threat model §4.8. |
+| Record anchoring | | merged | Optional `data` field on transactions (≤ 80 bytes, signed, in the id; `RULES_VERSION` 5); reorg-safe `anchors` index; `getAnchors` RPC; `wallet anchor` / `find-anchor` (re-hashes the transaction, checks the merkle proof against SPV headers); `docs/ANCHORING.md`; threat model §4.8. |
+| Node-paid anchoring | | in review | `--anchor-key` (`npm run gen-anchor-key`) + protected `anchorRecord(data)`: idempotent (a retry never pays twice), coin selection under the chain lock skipping coins pending transactions spend, change split into a pool of coins so many records fit in one block; `getInfo.anchoring`; `l1_anchor_requests_total`; threat model D8–D9. |
 | External security review | — | prep in review; engagement pending | `docs/REVIEW-BRIEF.md` (reviewer package), `SECURITY.md`, findings issue template; the self-audit that preceded it found and fixed three P2P-boundary bugs (threat model F6–F8: claimed-hash poisoning, PoA signature outside the block hash, no wire type checks). |
 
 ## 5. How to run

@@ -224,3 +224,24 @@ describe("buildAnchorTransaction (record anchoring)", () => {
     expect(() => bumpFee({ keyPair: kp, original: tx, newFee: 100n, timestamp: 2000 })).toThrow(/no output/);
   });
 });
+
+describe("buildAnchorTransaction change splitting (a node's anchor coin pool)", () => {
+  const base = { keyPair: kp, data: "ab".repeat(32), fee: 5n, timestamp: 1234, tipHeight: 10, coinbaseMaturity: 0 };
+
+  it("splits the change into equal coins, the remainder on the last, all back to the sender", () => {
+    const tx = buildAnchorTransaction({ ...base, unspent: [utxo("a", 105n)], changeSplit: 3 });
+    expect(tx.outputs).toEqual([
+      { address: me, amount: 33n },
+      { address: me, amount: 33n },
+      { address: me, amount: 34n },
+    ]);
+    expect(validateTransactionStructure(tx)).toEqual({ valid: true });
+  });
+
+  it("never makes a coin of zero: small change gets fewer pieces", () => {
+    expect(buildAnchorTransaction({ ...base, unspent: [utxo("a", 7n)], changeSplit: 8 }).outputs).toEqual([
+      { address: me, amount: 1n },
+      { address: me, amount: 1n },
+    ]);
+  });
+});

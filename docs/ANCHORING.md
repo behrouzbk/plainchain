@@ -118,8 +118,68 @@ Rules for `data`:
 - the transaction still needs at least one output (change back to
   yourself is fine).
 
-There is no node-side "anchor this for me" endpoint yet: the key that
-pays the fee stays with whoever signs.
+### Let the node pay: `anchorRecord`
+
+For client systems that should not hold keys, the node can sign and pay
+for anchors itself. The client sends only the hash.
+
+**Operator setup (once):**
+
+```powershell
+npm run gen-anchor-key -- --out data/n1/anchor.key      # PowerShell: npx tsx scripts/genAnchorKey.ts --out data/n1/anchor.key
+```
+
+```
+anchor key written: data/n1/anchor.key (keep it private; start the node with --anchor-key data/n1/anchor.key)
+anchor address: l11tgqkx85lrsstt53xv8alpu5xvcu9kqrltqcj3a88ngka920er2ys3cm7aq
+```
+
+1. Send coins to that address (`wallet send --to <anchor address> --amount 1000`).
+2. Start the node with `--anchor-key data/n1/anchor.key` (or
+   `L1_ANCHOR_KEY`). The log says `anchoring: anchorRecord fees are paid
+   from l11…`, and `getInfo` shows `"anchoring": { "address": … }`.
+
+**Client call** (needs the RPC bearer token, because it spends the
+operator's coins):
+
+```bash
+curl -s http://127.0.0.1:9001/rpc -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $L1_RPC_TOKEN" \
+  -d '{"jsonrpc":"2.0","method":"anchorRecord","params":["cccc…cccc"],"id":1}'
+```
+
+```json
+{"jsonrpc":"2.0","id":1,"result":{"status":"pending","txId":"ac54ccdc…0ff7"}}
+```
+
+Call it again with the same hash at any time. It never pays twice:
+
+- `"pending"`: sent, waiting for a block (same `txId` as before).
+- `"confirmed"`: in a block, with `txId`, `height`, `blockHash`,
+  `blockTimestamp` and `confirmations` (the same fields as `getAnchors`).
+
+So a client can simply repeat the call until it answers `"confirmed"`.
+
+Errors:
+
+| Code | Meaning |
+|---|---|
+| `-32004` | no or wrong bearer token |
+| `-32005` | the node has no `--anchor-key` |
+| `-32602` | the record is not hex or is over 80 bytes |
+| `-32000` | no free coins at the anchor address (the message names it) |
+
+**How many per block.** Coins spent by a pending anchor can't be used
+again until the next block. So the node keeps a pool of coins: when it
+has fewer than 16 free coins, it splits its change into up to 8 coins.
+With one funding payment you can anchor 1 record in the first block, up
+to 8 in the next, and more after that. To anchor many records per block
+from the start, send several separate payments to the anchor address.
+Each anchor costs the node's minimum fee.
+
+**Keep the anchor key small.** The node reads the key unencrypted at
+startup (a "hot" key). Keep only what fees need on that address and top
+it up. `/metrics` counts calls in `l1_anchor_requests_total{outcome}`.
 
 ## 4. Computing the hash yourself
 
