@@ -4,7 +4,7 @@ All notable changes, newest first. Consensus-affecting changes name the
 `RULES_VERSION` they introduce: nodes on different rule versions refuse to
 peer, so such a change is a coordinated upgrade for every node of a chain.
 
-## Unreleased
+## v0.1.2 — 2026-09-26
 
 Rules version **5** (a coordinated upgrade: every node of a chain must run
 it; existing data directories and genesis stay valid).

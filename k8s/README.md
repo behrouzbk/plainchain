@@ -18,7 +18,7 @@ Before a real deployment:
 - **Image.** The base references `ghcr.io/behrouzbk/plainchain:main`,
   published by `.github/workflows/release.yml` on every push to `main`
   (`vX.Y.Z` tags publish `X.Y.Z`, `X.Y` and `latest`). Pin a version with
-  `cd k8s/base && kustomize edit set image ghcr.io/behrouzbk/plainchain=ghcr.io/behrouzbk/plainchain:0.1.1`.
+  `cd k8s/base && kustomize edit set image ghcr.io/behrouzbk/plainchain=ghcr.io/behrouzbk/plainchain:0.1.2`.
   While the repository is private the package is too; give the cluster a
   pull secret named `ghcr-pull` (the StatefulSet already references it):
   `kubectl -n l1 create secret docker-registry ghcr-pull --docker-server=ghcr.io --docker-username=<github user> --docker-password=<token with read:packages>`.
