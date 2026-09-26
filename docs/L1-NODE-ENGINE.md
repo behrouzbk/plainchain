@@ -28,7 +28,7 @@ consortium deployments, by a Clique-style proof of authority; gossip blocks
 and transactions over WebSockets; validate every consensus rule; resolve
 forks by heaviest chain with incremental crash-atomic reorgs; expose a
 JSON-RPC 2.0 interface to wallets; and converge on byte-identical state.
-Every component was built test-first; the suite stands at **576 tests**, a
+Every component was built test-first; the suite stands at **619 tests**, a
 large share of which are explicit adversarial cases (coin-minting attempts,
 inflated coinbases, forged targets and seals, malformed peer traffic,
 hash poisoning, mid-reorg failures). Behaviour is additionally verified

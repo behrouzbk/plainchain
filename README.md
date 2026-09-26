@@ -9,7 +9,7 @@ every hash, signature, Merkle tree, key derivation and TLS certificate comes
 from Node's built-in `crypto`, and the only runtime dependencies are
 `express`, `level` and `ws`. It runs a proof-of-work chain by default, or a
 proof-of-authority chain for a group of companies that want a shared ledger
-without a public token. About 17,000 lines under `src/`, 576 tests — a large
+without a public token. About 9,000 lines under `src/`, 619 tests — a large
 share of them explicit attacks that the rules are shown to stop.
 
 **Status:** v0.1.2. Feature-complete for private and consortium use;
@@ -39,7 +39,7 @@ Requires Node.js 20 or newer (22 recommended) and Git.
 git clone https://github.com/behrouzbk/plainchain.git
 cd plainchain
 npm ci
-npm test            # 576 tests, about three minutes
+npm test            # 619 tests, about three minutes
 npm run simulate    # three real node processes: mine, propagate, agree
 ```
 

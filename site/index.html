@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PlainChain — a Layer 1 blockchain you can read in an afternoon</title>
-<meta name="description" content="A complete Layer 1 blockchain node in TypeScript with no blockchain SDKs: proof of work or proof of authority, UTXO ledger, SPV wallet, Docker and Kubernetes. Open source, Apache 2.0, 576 tests.">
+<meta name="description" content="A complete Layer 1 blockchain node in TypeScript with no blockchain SDKs: proof of work or proof of authority, UTXO ledger, SPV wallet, Docker and Kubernetes. Open source, Apache 2.0, 619 tests.">
 <meta property="og:title" content="PlainChain — a Layer 1 blockchain you can read in an afternoon">
-<meta property="og:description" content="Open-source Layer 1 node in TypeScript, built from Node's own crypto. Proof of work or proof of authority. 576 tests, a public threat model, Docker and Kubernetes.">
+<meta property="og:description" content="Open-source Layer 1 node in TypeScript, built from Node's own crypto. Proof of work or proof of authority. 619 tests, a public threat model, Docker and Kubernetes.">
 <meta property="og:type" content="website">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231f6f5f'/%3E%3Crect x='6' y='13' width='6' height='6' fill='white'/%3E%3Crect x='13' y='13' width='6' height='6' fill='white'/%3E%3Crect x='20' y='13' width='6' height='6' fill='white'/%3E%3C/svg%3E">
 <style>
@@ -70,7 +70,7 @@
     <a class="secondary" href="https://github.com/behrouzbk/plainchain">View on GitHub</a>
   </div>
   <div class="facts">
-    <div><b>576</b><span>automated tests, many of them explicit attacks</span></div>
+    <div><b>619</b><span>automated tests, many of them explicit attacks</span></div>
     <div><b>3</b><span>runtime dependencies</span></div>
     <div><b>~17k</b><span>lines of TypeScript, readable in one sitting</span></div>
     <div><b>55</b><span>threats in a public threat model, each tied to code and a test</span></div>
@@ -94,7 +94,7 @@
   <pre><code>git clone https://github.com/behrouzbk/plainchain.git
 cd plainchain
 npm ci
-npm test            # 576 tests, about three minutes
+npm test            # 619 tests, about three minutes
 npm run simulate    # three real node processes mine, propagate, and agree</code></pre>
   <p>Then follow the <a href="https://github.com/behrouzbk/plainchain/blob/main/docs/HANDS-ON-TESTING.md">hands-on walkthrough</a>: create two wallets, mine, pay, bump a fee, and verify the payment with the light client — every command with its expected output. Three containers with <code>docker compose up</code>; the same mesh on Kubernetes with <code>kubectl apply -k k8s/base</code>.</p>
 </section>
