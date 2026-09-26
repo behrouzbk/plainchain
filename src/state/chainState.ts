@@ -36,6 +36,20 @@ export interface AddressActivity {
   sent: bigint;
 }
 
+/** One confirmed transaction carrying a record (see Transaction.data). */
+export interface Anchor {
+  txId: string;
+  height: number;
+  blockHash: string;
+  /** The block's timestamp: when the chain first saw the record. */
+  blockTimestamp: number;
+}
+
+function anchorKey(data: string, height: number): string {
+  // Data is hex, so ":" ends it: one record can't match a longer one.
+  return `${data}:${String(height).padStart(HEIGHT_WIDTH, "0")}:`;
+}
+
 function heightKey(height: number): string {
   return `height:${height}`;
 }
@@ -71,7 +85,38 @@ export class ChainState {
     private readonly headers: Sublevel,
     private readonly txIndex: Sublevel,
     private readonly addrIndex: Sublevel,
+    private readonly anchors: Sublevel,
   ) {}
+
+  /**
+   * Anchor index: every canonical transaction carrying record data, keyed
+   * by the data then height, so one range scan lists a record's anchors
+   * oldest first. Maintained in the adoption batch like the tx index, so
+   * it follows reorgs; not pruned (an anchor's value is that it lasts).
+   */
+  putAnchorOp(anchor: Anchor & { data: string }): StateBatchOperation {
+    return {
+      type: "put",
+      sublevel: this.anchors,
+      key: anchorKey(anchor.data, anchor.height) + anchor.txId,
+      value: JSON.stringify({ blockHash: anchor.blockHash, blockTimestamp: anchor.blockTimestamp }),
+    };
+  }
+
+  deleteAnchorOp(data: string, height: number, txId: string): StateBatchOperation {
+    return { type: "del", sublevel: this.anchors, key: anchorKey(data, height) + txId };
+  }
+
+  async listAnchors(data: string, limit: number): Promise<Anchor[]> {
+    const out: Anchor[] = [];
+    const prefix = `${data}:`;
+    for await (const [key, raw] of this.anchors.iterator({ gte: prefix, lt: `${prefix}\xff`, limit })) {
+      const [, heightText, txId] = key.split(":");
+      const value = JSON.parse(raw) as { blockHash: string; blockTimestamp: number };
+      out.push({ txId: txId!, height: Number(heightText), ...value });
+    }
+    return out;
+  }
 
   /**
    * Transaction index: txId -> canonical block hash, maintained inside the

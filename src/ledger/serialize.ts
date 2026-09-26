@@ -11,6 +11,7 @@ interface WireTransaction {
   outputs: WireTxOutput[];
   timestamp: number;
   fee: string;
+  data?: string;
 }
 
 interface WireBlock {
@@ -34,6 +35,8 @@ function toWireTransaction(tx: Transaction): WireTransaction {
     outputs: tx.outputs.map(toWireOutput),
     timestamp: tx.timestamp,
     fee: tx.fee.toString(),
+    // Only when present: a payment's wire form (and so block size) is unchanged.
+    ...(tx.data === undefined ? {} : { data: tx.data }),
   };
 }
 
@@ -44,6 +47,7 @@ function fromWireTransaction(wire: WireTransaction): Transaction {
     outputs: wire.outputs.map(fromWireOutput),
     timestamp: wire.timestamp,
     fee: BigInt(wire.fee),
+    ...(wire.data === undefined ? {} : { data: wire.data }),
   };
 }
 
@@ -77,6 +81,7 @@ export function parseWireTransaction(value: unknown): Transaction {
   if (!Array.isArray(value.inputs)) throw new Error("transaction.inputs must be an array");
   if (!Array.isArray(value.outputs)) throw new Error("transaction.outputs must be an array");
   if (typeof value.timestamp !== "number") throw new Error("transaction.timestamp must be a number");
+  if (value.data !== undefined && typeof value.data !== "string") throw new Error("transaction.data must be a hex string");
 
   const inputs = value.inputs.map((input, i) => {
     if (!isRecord(input)) throw new Error(`inputs[${i}] must be an object`);
@@ -100,6 +105,7 @@ export function parseWireTransaction(value: unknown): Transaction {
     outputs,
     timestamp: value.timestamp,
     fee: parseAmount(value.fee, "transaction.fee"),
+    ...(value.data === undefined ? {} : { data: value.data }),
   };
 }
 

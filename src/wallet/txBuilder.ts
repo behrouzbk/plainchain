@@ -1,21 +1,29 @@
 import type { KeyPair } from "../crypto/keypair.js";
 import { sign } from "../crypto/signature.js";
 import { deriveAddress } from "../ledger/address.js";
-import { computeTransactionId, getSigningPayload } from "../ledger/transaction.js";
+import { computeTransactionId, getSigningPayload, MAX_TX_DATA_BYTES } from "../ledger/transaction.js";
 import type { Transaction, TxInput, TxOutput, UnsignedTransactionBody } from "../ledger/types.js";
 import type { Unspent } from "../state/utxoSet.js";
 
-export interface BuildTransactionArgs {
+interface SpendArgs {
   keyPair: KeyPair;
   /** Everything the node reports as unspent for the key pair's address. */
   unspent: Unspent[];
-  to: string;
-  amount: bigint;
   fee: bigint;
   timestamp: number;
   /** Current chain tip; the transaction would be mined at tipHeight + 1. */
   tipHeight: number;
   coinbaseMaturity: number;
+}
+
+export interface BuildTransactionArgs extends SpendArgs {
+  to: string;
+  amount: bigint;
+}
+
+export interface BuildAnchorArgs extends SpendArgs {
+  /** The record to anchor, lowercase hex (typically a sha256 of a document). */
+  data: string;
 }
 
 export class InsufficientFundsError extends Error {
@@ -72,11 +80,28 @@ export function selectCoins(spendable: Unspent[], target: bigint): Unspent[] {
  * same canonical payload (see getSigningPayload).
  */
 export function buildTransaction(args: BuildTransactionArgs): Transaction {
-  const { keyPair, to, amount, fee, timestamp, tipHeight, coinbaseMaturity } = args;
+  const { to, amount } = args;
   if (amount <= 0n) throw new Error(`amount must be positive, got ${amount}`);
-  if (fee < 0n) throw new Error(`fee must be non-negative, got ${fee}`);
+  if (args.fee < 0n) throw new Error(`fee must be non-negative, got ${args.fee}`);
   if (to.length === 0) throw new Error("recipient address must not be empty");
+  return buildSigned(args, [{ address: to, amount }], 0n);
+}
 
+/**
+ * Builds and signs a transaction that anchors `data` on chain and pays
+ * nobody: the only output is change back to the sender. A transaction
+ * needs at least one output, so the coins must cover the fee plus one.
+ */
+export function buildAnchorTransaction(args: BuildAnchorArgs): Transaction {
+  if (!/^([0-9a-f]{2})+$/.test(args.data)) throw new Error("data must be non-empty lowercase hex");
+  if (args.data.length / 2 > MAX_TX_DATA_BYTES) throw new Error(`data is ${args.data.length / 2} bytes, more than the ${MAX_TX_DATA_BYTES}-byte limit`);
+  if (args.fee < 0n) throw new Error(`fee must be non-negative, got ${args.fee}`);
+  return buildSigned(args, [], 1n, args.data);
+}
+
+/** Selects coins for `payments` + fee (+ `minChange`), adds change, signs every input. */
+function buildSigned(args: SpendArgs, payments: TxOutput[], minChange: bigint, data?: string): Transaction {
+  const { keyPair, fee, timestamp, tipHeight, coinbaseMaturity } = args;
   const ownAddress = deriveAddress(keyPair.publicKey);
   const foreign = args.unspent.find((u) => u.address !== ownAddress);
   if (foreign) {
@@ -85,11 +110,11 @@ export function buildTransaction(args: BuildTransactionArgs): Transaction {
 
   const spendable = args.unspent.filter((u) => isMature(u, tipHeight, coinbaseMaturity));
   const immature = args.unspent.filter((u) => !isMature(u, tipHeight, coinbaseMaturity)).reduce((s, u) => s + u.amount, 0n);
-  const required = amount + fee;
+  const required = payments.reduce((s, o) => s + o.amount, 0n) + fee;
 
   let chosen: Unspent[];
   try {
-    chosen = selectCoins(spendable, required);
+    chosen = selectCoins(spendable, required + minChange);
   } catch (err) {
     if (err instanceof InsufficientFundsError) {
       throw new InsufficientFundsError(err.available, err.required, immature);
@@ -98,7 +123,7 @@ export function buildTransaction(args: BuildTransactionArgs): Transaction {
   }
 
   const inputTotal = chosen.reduce((s, u) => s + u.amount, 0n);
-  const outputs: TxOutput[] = [{ address: to, amount }];
+  const outputs: TxOutput[] = [...payments];
   const change = inputTotal - required;
   if (change > 0n) outputs.push({ address: ownAddress, amount: change });
 
@@ -108,7 +133,7 @@ export function buildTransaction(args: BuildTransactionArgs): Transaction {
     signature: "",
     publicKey: keyPair.publicKey,
   }));
-  const body: UnsignedTransactionBody = { inputs: unsignedInputs, outputs, timestamp, fee };
+  const body: UnsignedTransactionBody = { inputs: unsignedInputs, outputs, timestamp, fee, ...(data === undefined ? {} : { data }) };
   const signature = sign(keyPair.privateKey, getSigningPayload(body));
   const signed: UnsignedTransactionBody = {
     ...body,
@@ -149,9 +174,13 @@ export function bumpFee(args: BumpFeeArgs): Transaction {
 
   const outputs: TxOutput[] = original.outputs.map((o, i) => (i === changeIndex ? { ...o, amount: o.amount - extra } : { ...o }));
   if (outputs[changeIndex]!.amount === 0n) outputs.splice(changeIndex, 1);
+  if (outputs.length === 0) {
+    throw new Error(`a bump to ${newFee} would spend the whole change output and leave no output; a transaction needs at least one`);
+  }
 
   const unsignedInputs: TxInput[] = original.inputs.map((input) => ({ ...input, signature: "" }));
-  const body: UnsignedTransactionBody = { inputs: unsignedInputs, outputs, timestamp, fee: newFee };
+  // The record (if any) is kept: the replacement anchors the same data.
+  const body: UnsignedTransactionBody = { inputs: unsignedInputs, outputs, timestamp, fee: newFee, ...(original.data === undefined ? {} : { data: original.data }) };
   const signature = sign(keyPair.privateKey, getSigningPayload(body));
   const signed: UnsignedTransactionBody = { ...body, inputs: unsignedInputs.map((input) => ({ ...input, signature })) };
   return { ...signed, id: computeTransactionId(signed) };

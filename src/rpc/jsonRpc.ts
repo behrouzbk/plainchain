@@ -1,5 +1,6 @@
 import { AddressError, normalizeAddress } from "../ledger/address.js";
 import { parseWireTransaction } from "../ledger/serialize.js";
+import { MAX_TX_DATA_BYTES } from "../ledger/transaction.js";
 import { AddressIndexDisabledError, type Node } from "../node/node.js";
 
 /** JSON-RPC 2.0 reserved codes plus this node's application range. */
@@ -146,6 +147,20 @@ function buildMethods(node: Node): Record<string, { params: string[]; handler: H
         const proof = await node.getTransactionProof(requireString(p, "txId"));
         if (!proof) throw new JsonRpcError(RpcErrorCode.NOT_FOUND, "transaction not found in the canonical chain (unknown, not confirmed, or in an abandoned fork)");
         return proof;
+      },
+    },
+    getAnchors: {
+      params: ["data", "limit"],
+      handler: async (p) => {
+        const data = requireString(p, "data").toLowerCase();
+        if (!/^([0-9a-f]{2})+$/.test(data) || data.length / 2 > MAX_TX_DATA_BYTES) {
+          throw new JsonRpcError(RpcErrorCode.INVALID_PARAMS, `data must be hex, 1 to ${MAX_TX_DATA_BYTES} bytes (e.g. the sha256 of a document)`);
+        }
+        const limit = p.limit === undefined ? 100 : p.limit;
+        if (typeof limit !== "number" || !Number.isInteger(limit) || limit < 1 || limit > 1000) {
+          throw new JsonRpcError(RpcErrorCode.INVALID_PARAMS, "limit must be an integer between 1 and 1000");
+        }
+        return node.getAnchors(data, limit);
       },
     },
     getSupply: {

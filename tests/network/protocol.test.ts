@@ -155,6 +155,16 @@ describe("encodeMessage / decodeMessage", () => {
       expect(() => decodeMessage(raw({ type: "NEW_TX", payload: { transaction: null } }))).toThrow(/transaction/);
     });
 
+    it("a transaction's record data survives the trip (dropping it would change the id and get an honest peer penalised)", () => {
+      const withData = { ...tx, data: "ab".repeat(32) };
+      const decoded = decodeMessage(raw({ type: "NEW_TX", payload: { transaction: withData } })) as { payload: { transaction: Transaction } };
+      expect(decoded.payload.transaction.data).toBe("ab".repeat(32));
+      const plain = decodeMessage(raw({ type: "NEW_TX", payload: { transaction: tx } })) as { payload: { transaction: Transaction } };
+      expect("data" in plain.payload.transaction).toBe(false);
+      expect(() => decodeMessage(raw({ type: "NEW_TX", payload: { transaction: { ...tx, data: 5 } } }))).toThrow(/data/);
+      expect(() => decodeMessage(raw({ type: "NEW_TX", payload: { transaction: { ...tx, data: "XYZ" } } }))).toThrow(/data/);
+    });
+
     it("locators, inventories and peer lists must be arrays of strings", () => {
       expect(() => decodeMessage(raw({ type: "GET_HEADERS", payload: { locator: [1] } }))).toThrow(/locator/);
       expect(() => decodeMessage(raw({ type: "INV_BLOCKS", payload: { hashes: "x" } }))).toThrow(/hashes/);

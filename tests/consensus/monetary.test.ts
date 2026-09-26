@@ -89,8 +89,8 @@ describe("maxSupply and nextHalvingHeight", () => {
 
 describe("rulesHash", () => {
   it("carries a rules version so nodes on different code with the same config still refuse each other", () => {
-    // Bumped whenever a validity rule changes (last: retarget window fix, #27).
-    expect(RULES_VERSION).toBe(4);
+    // Bumped whenever a validity rule changes (last: transactions may carry record data).
+    expect(RULES_VERSION).toBe(5);
   });
 
   it("is deterministic and independent of key order", () => {

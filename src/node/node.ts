@@ -22,7 +22,7 @@ import { MetricsRegistry, type Counter } from "../metrics/registry.js";
 import { AddressBook, type AddressBookOptions } from "../network/addressBook.js";
 import { P2PServer, type P2PServerOptions } from "../network/p2pServer.js";
 import type { Message } from "../network/protocol.js";
-import { ChainState, type AddressActivity, type BlockUndo, type ChainTip } from "../state/chainState.js";
+import { ChainState, type AddressActivity, type Anchor, type BlockUndo, type ChainTip } from "../state/chainState.js";
 import { closeStateDb, commitAtomic, openStateDb, type StateBatchOperation, type StateDb } from "../state/db.js";
 import { loadAddressBookJson, saveAddressBookJson } from "../state/peerStore.js";
 import { UtxoSet, type Unspent, type ValidationResult } from "../state/utxoSet.js";
@@ -381,7 +381,7 @@ export class Node {
   async start(): Promise<void> {
     this.db = openStateDb(this.options.dataDir);
     this.utxoSet = new UtxoSet(this.db.utxo, this.options.consensus.coinbaseMaturity);
-    this.chainState = new ChainState(this.db.blocks, this.db.meta, this.db.undo, this.db.headers, this.db.txIndex, this.db.addrIndex);
+    this.chainState = new ChainState(this.db.blocks, this.db.meta, this.db.undo, this.db.headers, this.db.txIndex, this.db.addrIndex, this.db.anchors);
     this.mempool = new Mempool(this.utxoSet, this.options.mempool.maxSize, this.options.mempool.minFee, {
       ...(this.options.mempool.maxReplacements !== undefined ? { maxReplacements: this.options.mempool.maxReplacements } : {}),
     });
@@ -734,6 +734,17 @@ export class Node {
   async getAddressHistory(address: string, limit = 50): Promise<AddressActivity[]> {
     if (!this.addressIndexEnabled) throw new AddressIndexDisabledError();
     return this.chainState.listAddressActivity(address, limit);
+  }
+
+  /**
+   * Confirmed transactions carrying `data` as their record, oldest first:
+   * the first is the proof that the record existed by its block's time.
+   * Pending (mempool) records are not listed.
+   */
+  async getAnchors(data: string, limit = 100): Promise<(Anchor & { confirmations: number })[]> {
+    const tipHeight = (await this.chainState.getTip())?.height ?? 0;
+    const anchors = await this.chainState.listAnchors(data, limit);
+    return anchors.map((a) => ({ ...a, confirmations: tipHeight - a.height + 1 }));
   }
 
   async getInfo(): Promise<ChainInfo> {
@@ -1605,6 +1616,9 @@ export class Node {
     ops.push(this.chainState.putUndoOp(block.hash, undo));
     for (const tx of block.transactions) {
       ops.push(this.chainState.putTxLocationOp(tx.id, block.hash));
+      if (tx.data !== undefined) {
+        ops.push(this.chainState.putAnchorOp({ data: tx.data, txId: tx.id, height: block.header.height, blockHash: block.hash, blockTimestamp: block.header.timestamp }));
+      }
     }
     if (this.addressIndexEnabled) {
       ops.push(...this.addressIndexOps(block, undo, false));
@@ -1632,6 +1646,7 @@ export class Node {
     ops.push(this.chainState.deleteUndoOp(block.hash));
     for (const tx of block.transactions) {
       ops.push(this.chainState.deleteTxLocationOp(tx.id));
+      if (tx.data !== undefined) ops.push(this.chainState.deleteAnchorOp(tx.data, block.header.height, tx.id));
     }
     if (this.addressIndexEnabled) {
       // Deletes are idempotent, so entries pruned earlier need nothing here.

@@ -26,7 +26,9 @@ import {
 import { generateMnemonic, MnemonicError, mnemonicToEntropy, type WordCount } from "../wallet/mnemonic.js";
 import { loadVerifiedHeaders, saveHeaders } from "../wallet/headerStore.js";
 import { HeaderSyncError, syncHeaders, verifyInclusion, type ChainHeader, type InclusionProof, type SpvParams, type SyncResult } from "../wallet/spv.js";
-import { buildTransaction, bumpFee, InsufficientFundsError, isMature } from "../wallet/txBuilder.js";
+import { buildAnchorTransaction, buildTransaction, bumpFee, InsufficientFundsError, isMature } from "../wallet/txBuilder.js";
+import { sha256 } from "../crypto/hash.js";
+import { computeTransactionId, MAX_TX_DATA_BYTES } from "../ledger/transaction.js";
 import { isLoopbackHost } from "../rpc/tls.js";
 import { JsonRpcClient, RpcError, RpcTransportError } from "./rpcClient.js";
 
@@ -63,6 +65,11 @@ Commands:
   send                Pay --amount to --to (plus --fee, default: node's minimum)
   bump                Replace a pending payment (--tx) with a copy paying --fee, taken
                       from its change output (replace-by-fee)
+  anchor              Record a document on chain: sends its sha256 (--file <path>, hashed
+                      here; or --hash <hex>) in a transaction that pays nobody (fee only)
+  find-anchor         Prove a record was anchored (--file or --hash): block, height, block
+                      time, confirmations; checks the transaction carries the record, its
+                      merkle proof and the header chain, without trusting the node
   info                Show the node's chain info
   verify              SPV-check that --tx is confirmed: verifies the header chain from
                       genesis (PoW, targets, timestamps) and a merkle inclusion proof,
@@ -87,7 +94,10 @@ Options:
   --out <path>          Where to write the watch-only copy (watch-only)
   --raw                 Print addresses as raw hex (address, account list)
   --amount <n>          Amount in base units, integer (send)
-  --fee <n>             Fee in base units, integer (send; bump: the new, higher fee)
+  --fee <n>             Fee in base units, integer (send, anchor; bump: the new, higher fee)
+  --file <path>         Document to anchor or look up; only its sha256 is sent (anchor, find-anchor)
+  --hash <hex>          Record to anchor or look up, e.g. a sha256 computed elsewhere (up to
+                        80 bytes of hex) (anchor, find-anchor)
   --tx <txId>           Transaction to verify (verify) or replace (bump)
   --genesis-hash <h>    Trusted genesis hash (verify/sync; default: computed from config/default.json)
   --config <path>       Chain config (genesis, consensus rules, authorities) for verify/sync
@@ -131,6 +141,13 @@ interface WireActivity {
   received: string;
   sent: string;
 }
+interface WireAnchor {
+  txId: string;
+  height: number;
+  blockHash: string;
+  blockTimestamp: number;
+  confirmations: number;
+}
 interface WireUnspent {
   txId: string;
   outputIndex: number;
@@ -160,6 +177,24 @@ function parseAccount(flags: Record<string, string>): number {
   if (flags.account === undefined) return 0;
   if (!/^\d+$/.test(flags.account)) throw new UsageError(`--account must be a non-negative integer, got "${flags.account}"`);
   return Number(flags.account);
+}
+
+/**
+ * The record to anchor or look up: `--file` (sha256 of its bytes, computed
+ * here, so the file never leaves this machine) or `--hash` (a digest
+ * computed elsewhere; any hex record up to MAX_TX_DATA_BYTES).
+ */
+function parseRecord(flags: Record<string, string>): string {
+  if ((flags.file === undefined) === (flags.hash === undefined)) throw new UsageError("give exactly one of --file <path> or --hash <hex>");
+  if (flags.file !== undefined) {
+    if (!existsSync(flags.file)) throw new UsageError(`--file: ${flags.file} does not exist`);
+    return sha256(readFileSync(flags.file));
+  }
+  const record = flags.hash!.toLowerCase();
+  if (!/^([0-9a-f]{2})+$/.test(record) || record.length / 2 > MAX_TX_DATA_BYTES) {
+    throw new UsageError(`--hash must be hex, 1 to ${MAX_TX_DATA_BYTES} bytes (a sha256 is 64 hex characters)`);
+  }
+  return record;
 }
 
 /** Spending, deriving and backups need keys; a watch-only file has none, and says so before any prompt. */
@@ -530,6 +565,77 @@ export async function runWalletCli(argv: string[], io: CliIo): Promise<number> {
         const sent = await client.call<{ txId: string }>("sendRawTransaction", [JSON.parse(serializeTransaction(replacement))]);
         io.stdout(`replaced ${txId} (fee ${original.fee}) with a copy paying fee ${newFee}`);
         io.stdout(`txId: ${sent.txId}`);
+        return 0;
+      }
+
+      case "anchor": {
+        // Validate everything local first, as for send.
+        const record = parseRecord(flags);
+        const explicitFee = flags.fee !== undefined ? parseAmount(flags.fee, "fee") : undefined;
+        const keystore = loadKeystore(walletPath);
+        requireKeys(keystore, "sign an anchor");
+        const accountIndex = parseAccount(flags);
+        const account = selectAccount(keystore, accountIndex);
+        const [info, wireUnspent] = await Promise.all([
+          client.call<WireInfo>("getInfo"),
+          client.call<WireUnspent[]>("listUnspent", [account.address]),
+        ]);
+        const fee = explicitFee ?? BigInt(info.minFee);
+        const unspent = wireUnspent.map(fromWireUnspent);
+        const tipHeight = info.tip?.height ?? 0;
+        // Fee plus one unit of change: the transaction's only output.
+        let spendable = 0n;
+        let immature = 0n;
+        for (const u of unspent) {
+          if (isMature(u, tipHeight, info.coinbaseMaturity)) spendable += u.amount;
+          else immature += u.amount;
+        }
+        if (spendable < fee + 1n) throw new InsufficientFundsError(spendable, fee + 1n, immature);
+
+        const passphrase = await resolvePassphrase(flags, io, false);
+        const keyPair = unlockAccount(keystore, passphrase, accountIndex);
+        const tx = buildAnchorTransaction({ keyPair, unspent, data: record, fee, timestamp: Date.now(), tipHeight, coinbaseMaturity: info.coinbaseMaturity });
+        const { txId } = await client.call<{ txId: string }>("sendRawTransaction", [JSON.parse(serializeTransaction(tx))]);
+        io.stdout(`record: ${record}`);
+        io.stdout(`sent for anchoring (fee ${fee}); it is anchored once mined`);
+        io.stdout(`txId: ${txId}`);
+        io.stdout(`check with: find-anchor --hash ${record}`);
+        return 0;
+      }
+
+      case "find-anchor": {
+        const record = parseRecord(flags);
+        const anchors = await client.call<WireAnchor[]>("getAnchors", [record, 1]);
+        const first = anchors[0];
+        if (!first) throw new Error(`record ${record} is not anchored in the node's chain (never sent, or not mined yet)`);
+
+        // Nothing the node said is believed yet. The chain of evidence is:
+        // the transaction's content hashes to its id and carries the record;
+        // the id folds to the merkle root of a header on the verified chain.
+        const block = await client.call<{ transactions: unknown[] }>("getBlockByHash", [first.blockHash]);
+        const tx = block.transactions.map((t) => parseWireTransaction(t)).find((t) => t.id === first.txId);
+        if (!tx || computeTransactionId(tx) !== first.txId) throw new SpvError(`the node's block ${first.blockHash} does not contain transaction ${first.txId}`);
+        if (tx.data !== record) throw new SpvError(`transaction ${first.txId} does not carry the record`);
+
+        const proof = await client.call<InclusionProof>("getMerkleProof", [first.txId]);
+        const synced = await syncVerifiedHeaders(client, flags, io);
+        const header = synced.chain[proof.blockHeight];
+        if (!header) throw new SpvError(`proof refers to height ${proof.blockHeight}, beyond the verified chain tip ${synced.tipHeight}`);
+        if (proof.txId !== first.txId) throw new SpvError(`the node's proof is for ${proof.txId}, not ${first.txId}`);
+        if (synced.rejectedFork && header.hash !== proof.blockHash) {
+          throw new SpvError(`${synced.rejectedFork}; the anchor's block is not on the verified chain`);
+        }
+        const inclusion = verifyInclusion(proof, header);
+        if (!inclusion.valid) throw new SpvError(`inclusion proof invalid: ${inclusion.reason}`);
+
+        io.stdout(`record: ${record}`);
+        io.stdout(`anchored in block ${header.hash} at height ${proof.blockHeight}`);
+        io.stdout(`block time: ${new Date(header.header.timestamp).toISOString()}`);
+        io.stdout(`confirmations: ${synced.tipHeight - proof.blockHeight + 1}`);
+        io.stdout(`txId: ${first.txId}`);
+        io.stdout(`transaction carries the record: its content hashes to its id`);
+        io.stdout(`header chain valid from trusted genesis: ${describeSync(synced, synced.mode)}`);
+        io.stdout(`inclusion proof valid: ${proof.siblings.length} sibling hashes fold to the header's merkle root`);
         return 0;
       }
 

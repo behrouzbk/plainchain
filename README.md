@@ -24,6 +24,7 @@ review yet** (see [Security](#security)).
 | Ledger | UTXO accounting, coinbase maturity, crash-atomic reorganisations with undo records, reorg-safe transaction and address indexes (with optional pruning). |
 | Network | WebSocket gossip, header-first sync, peer discovery with a persisted address book, reputation and bans, per-address connection caps, every payload type-checked at the boundary. |
 | Mempool | Fee-ordered with eviction, full replace-by-fee. |
+| Record anchoring | Put a document's sha256 on chain in a transaction (up to 80 bytes of data) and prove later that it existed by the block's time. `getAnchors` over JSON-RPC; `wallet anchor` / `find-anchor`, which checks the proof itself instead of trusting the node. |
 | Wallet | BIP-39 recovery phrases, SLIP-0010 accounts, checksummed addresses, watch-only files, fee bumping, transaction history, and an SPV light client that verifies headers and Merkle proofs itself. |
 | Operations | JSON-RPC 2.0 with bearer auth, rate limiting and TLS; `/health` and Prometheus `/metrics`; JSON logs; every setting as a flag or `L1_*` env var; Docker compose testnet; Kubernetes manifests. |
 
@@ -99,7 +100,8 @@ enough for a two-authority consortium chain. Wallets pass the same
 | [docs/READ-IN-AN-AFTERNOON.md](docs/READ-IN-AN-AFTERNOON.md) | **Start here.** A guided walk through the six modules in build order, with one test to run and one exercise per module |
 | [docs/L1-NODE-ENGINE.md](docs/L1-NODE-ENGINE.md) | The architecture, every consensus rule as enforced, the P2P and RPC protocols, how to run and test |
 | [docs/HANDS-ON-TESTING.md](docs/HANDS-ON-TESTING.md) | Every feature exercised by hand, with expected output |
-| [docs/THREAT-MODEL.md](docs/THREAT-MODEL.md) | About 55 threats, each tied to the code that stops it and the test that proves it; accepted risks; findings and fixes |
+| [docs/ANCHORING.md](docs/ANCHORING.md) | Record anchoring: anchor a file, check it, the JSON-RPC calls, and what a proof does and does not mean |
+| [docs/THREAT-MODEL.md](docs/THREAT-MODEL.md) | About 60 threats, each tied to the code that stops it and the test that proves it; accepted risks; findings and fixes |
 | [docs/REVIEW-BRIEF.md](docs/REVIEW-BRIEF.md) | The package for a security reviewer: scope, risk areas in priority order, how to report |
 | [CHANGELOG.md](CHANGELOG.md) | What changed in each release, with the consensus rules version |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | The engineering conventions: layering, test-first, one attack test per rule, how to send a change |
