@@ -30,7 +30,7 @@ describe("ChainState", () => {
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "l1-node-chainstate-test-"));
     db = openStateDb(dir);
-    chainState = new ChainState(db.blocks, db.meta, db.undo, db.headers, db.txIndex, db.addrIndex);
+    chainState = new ChainState(db.blocks, db.meta, db.undo, db.headers, db.txIndex, db.addrIndex, db.anchors);
     genesis = createGenesisBlock({
       timestamp: 1700000000000,
       difficultyTarget: "f".repeat(64),
@@ -115,7 +115,7 @@ describe("ChainState", () => {
     await closeStateDb(db);
 
     const reopenedDb = openStateDb(dir);
-    const reopenedChainState = new ChainState(reopenedDb.blocks, reopenedDb.meta, reopenedDb.undo, reopenedDb.headers, reopenedDb.txIndex, reopenedDb.addrIndex);
+    const reopenedChainState = new ChainState(reopenedDb.blocks, reopenedDb.meta, reopenedDb.undo, reopenedDb.headers, reopenedDb.txIndex, reopenedDb.addrIndex, reopenedDb.anchors);
 
     expect(await reopenedChainState.getBlock(genesis.hash)).toEqual(genesis);
     expect(await reopenedChainState.getTip()).toEqual({
@@ -145,7 +145,7 @@ describe("ChainState", () => {
       await chainState.putHeader(genesis.hash, genesis.header, 99n);
       await closeStateDb(db);
       db = openStateDb(dir);
-      const reopened = new ChainState(db.blocks, db.meta, db.undo, db.headers, db.txIndex, db.addrIndex);
+      const reopened = new ChainState(db.blocks, db.meta, db.undo, db.headers, db.txIndex, db.addrIndex, db.anchors);
       expect((await reopened.getHeader(genesis.hash))?.work).toBe(99n);
     });
   });
@@ -163,6 +163,34 @@ describe("ChainState", () => {
       expect(await chainState.isTxIndexBuilt()).toBe(false);
       await chainState.markTxIndexBuilt();
       expect(await chainState.isTxIndexBuilt()).toBe(true);
+    });
+  });
+
+  describe("anchor index", () => {
+    const record = "ab".repeat(32);
+    const entry = (height: number, txId: string) => ({ data: record, height, txId, blockHash: `block-${height}`, blockTimestamp: 1700000000000 + height });
+
+    it("lists every confirmed anchor of a record, oldest first (the earliest is the proof of existence)", async () => {
+      await db.root.batch([chainState.putAnchorOp(entry(12, "tx-b")), chainState.putAnchorOp(entry(3, "tx-a")), chainState.putAnchorOp(entry(100, "tx-c"))]);
+      const anchors = await chainState.listAnchors(record, 10);
+      expect(anchors.map((a) => [a.height, a.txId, a.blockHash, a.blockTimestamp])).toEqual([
+        [3, "tx-a", "block-3", 1700000000003],
+        [12, "tx-b", "block-12", 1700000000012],
+        [100, "tx-c", "block-100", 1700000000100],
+      ]);
+      expect((await chainState.listAnchors(record, 2)).map((a) => a.txId)).toEqual(["tx-a", "tx-b"]);
+    });
+
+    it("forgets an anchor on delete (the disconnect path of a reorg)", async () => {
+      await db.root.batch([chainState.putAnchorOp(entry(3, "tx-a"))]);
+      await db.root.batch([chainState.deleteAnchorOp(record, 3, "tx-a")]);
+      expect(await chainState.listAnchors(record, 10)).toEqual([]);
+    });
+
+    it("a record that is a prefix of another does not match it", async () => {
+      await db.root.batch([chainState.putAnchorOp({ ...entry(1, "tx-long"), data: `${record}cd` })]);
+      expect(await chainState.listAnchors(record, 10)).toEqual([]);
+      expect((await chainState.listAnchors(`${record}cd`, 10)).map((a) => a.txId)).toEqual(["tx-long"]);
     });
   });
 });

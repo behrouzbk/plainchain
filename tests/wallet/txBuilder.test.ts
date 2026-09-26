@@ -4,7 +4,7 @@ import { verify } from "../../src/crypto/signature.js";
 import { deriveAddress } from "../../src/ledger/address.js";
 import { computeTransactionId, getSigningPayload, validateTransactionStructure } from "../../src/ledger/transaction.js";
 import type { Unspent } from "../../src/state/utxoSet.js";
-import { bumpFee, buildTransaction, InsufficientFundsError, selectCoins } from "../../src/wallet/txBuilder.js";
+import { buildAnchorTransaction, bumpFee, buildTransaction, InsufficientFundsError, selectCoins } from "../../src/wallet/txBuilder.js";
 
 const kp = generateKeyPair();
 const me = deriveAddress(kp.publicKey);
@@ -188,5 +188,39 @@ describe("bumpFee (replace-by-fee from the wallet side)", () => {
   it("refuses to bump a transaction whose inputs are not signed by this key (cannot re-sign someone else's spend)", () => {
     const other = generateKeyPair();
     expect(() => bumpFee({ keyPair: other, original, newFee: 12n, timestamp: 1 })).toThrow(/not owned|not signed by/i);
+  });
+});
+
+describe("buildAnchorTransaction (record anchoring)", () => {
+  const record = "ab".repeat(32);
+  const base = { keyPair: kp, data: record, fee: 5n, timestamp: 1234, tipHeight: 10, coinbaseMaturity: 0 };
+
+  it("pays nobody: the record plus a change output back to the sender, signed over the record", () => {
+    const tx = buildAnchorTransaction({ ...base, unspent: [utxo("a", 100n)] });
+    expect(tx.data).toBe(record);
+    expect(tx.outputs).toEqual([{ address: me, amount: 95n }]);
+    expect(tx.fee).toBe(5n);
+    expect(validateTransactionStructure(tx)).toEqual({ valid: true });
+    expect(verify(kp.publicKey, getSigningPayload(tx), tx.inputs[0]!.signature)).toBe(true);
+  });
+
+  it("needs one unit beyond the fee, because a transaction must keep at least one output", () => {
+    expect(() => buildAnchorTransaction({ ...base, unspent: [utxo("a", 5n)] })).toThrow(InsufficientFundsError);
+    expect(buildAnchorTransaction({ ...base, unspent: [utxo("a", 6n)] }).outputs).toEqual([{ address: me, amount: 1n }]);
+  });
+
+  it("refuses a record that the network would refuse, before signing", () => {
+    for (const data of ["", "ABCD", "abc", "00".repeat(81)]) {
+      expect(() => buildAnchorTransaction({ ...base, data, unspent: [utxo("a", 100n)] }), data).toThrow(/data/);
+    }
+  });
+
+  it("bumpFee keeps the record, and refuses a bump that would leave no output", () => {
+    const tx = buildAnchorTransaction({ ...base, unspent: [utxo("a", 100n)] });
+    const bumped = bumpFee({ keyPair: kp, original: tx, newFee: 20n, timestamp: 2000 });
+    expect(bumped.data).toBe(record);
+    expect(bumped.outputs).toEqual([{ address: me, amount: 80n }]);
+    expect(validateTransactionStructure(bumped)).toEqual({ valid: true });
+    expect(() => bumpFee({ keyPair: kp, original: tx, newFee: 100n, timestamp: 2000 })).toThrow(/no output/);
   });
 });

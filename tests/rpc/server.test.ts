@@ -435,6 +435,40 @@ describe("JSON-RPC 2.0 endpoint (POST /rpc)", () => {
     expect(pending.body.error.message).toMatch(/not confirmed|not found/i);
   });
 
+  it("getAnchors finds a record sent with sendRawTransaction once it is mined, and accepts the record in upper case", async () => {
+    const record = "ab".repeat(32);
+    const genesisCoinbaseId = (await node.getBlockByHeight(0))!.transactions[0]!.id;
+    const body: UnsignedTransactionBody = {
+      inputs: [{ txId: genesisCoinbaseId, outputIndex: 0, signature: "", publicKey: genesisMiner.publicKey }],
+      outputs: [{ address: genesisAddress, amount: 4999999990n }],
+      timestamp: 1700000000500,
+      fee: 10n,
+      data: record,
+    };
+    body.inputs[0]!.signature = sign(genesisMiner.privateKey, getSigningPayload(body));
+    const tx = { ...body, id: computeTransactionId(body) };
+    const sent = await rpc({ jsonrpc: "2.0", method: "sendRawTransaction", params: [JSON.parse(serializeTransaction(tx))], id: 1 });
+    expect(sent.body.result).toEqual({ txId: tx.id });
+    expect((await rpc({ jsonrpc: "2.0", method: "getAnchors", params: [record], id: 2 })).body.result).toEqual([]);
+
+    await rpc({ jsonrpc: "2.0", method: "mine", id: 3 }, false, AUTH);
+    const block = (await node.getBlockByHeight(1))!;
+    const expected = [{ txId: tx.id, height: 1, blockHash: block.hash, blockTimestamp: block.header.timestamp, confirmations: 1 }];
+    expect((await rpc({ jsonrpc: "2.0", method: "getAnchors", params: [record], id: 4 })).body.result).toEqual(expected);
+    expect((await rpc({ jsonrpc: "2.0", method: "getAnchors", params: { data: record.toUpperCase(), limit: 1 }, id: 5 })).body.result).toEqual(expected);
+    // The mined block carries the record for anyone to check against the tx id.
+    expect((await rpc({ jsonrpc: "2.0", method: "getBlockByHeight", params: [1], id: 6 })).body.result.transactions[1].data).toBe(record);
+  });
+
+  it("getAnchors refuses a record that could never be anchored (not hex, or over the size limit) with -32602", async () => {
+    for (const data of ["not hex", "abc", "00".repeat(81), ""]) {
+      const res = await rpc({ jsonrpc: "2.0", method: "getAnchors", params: [data], id: 1 });
+      expect(res.body.error?.code, data).toBe(-32602);
+    }
+    const badLimit = await rpc({ jsonrpc: "2.0", method: "getAnchors", params: ["ab", 0], id: 2 });
+    expect(badLimit.body.error.code).toBe(-32602);
+  });
+
   it("getHeaders pages canonical headers with their hashes, and validates its params", async () => {
     await rpc({ jsonrpc: "2.0", method: "mine", id: 1 }, false, AUTH);
     await rpc({ jsonrpc: "2.0", method: "mine", id: 2 }, false, AUTH);

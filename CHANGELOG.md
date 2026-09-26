@@ -4,6 +4,21 @@ All notable changes, newest first. Consensus-affecting changes name the
 `RULES_VERSION` they introduce: nodes on different rule versions refuse to
 peer, so such a change is a coordinated upgrade for every node of a chain.
 
+## Unreleased
+
+Rules version **5** (a coordinated upgrade: every node of a chain must run
+it; existing data directories and genesis stay valid).
+
+- **Record anchoring.** A transaction may carry up to 80 bytes of `data`
+  (lowercase hex, usually a document's sha256), covered by its signatures
+  and id; transactions without it hash exactly as before. Nodes index
+  anchored records (reorg-safe, in the adoption batch) and answer JSON-RPC
+  `getAnchors(data, limit)`. Wallet: `anchor --file|--hash` and
+  `find-anchor --file|--hash`, which re-hashes the transaction and checks
+  its merkle proof against SPV-verified headers instead of trusting the
+  node. `bump` keeps the record. Guide: `docs/ANCHORING.md`; threat model
+  §4.8.
+
 ## v0.1.1 — 2026-09-21
 
 - **Renamed to PlainChain** (`behrouzbk/plainchain`, formerly `l1-node-engine`).

@@ -2685,3 +2685,110 @@ describe("Node proof of authority (consensus.mode = poa)", () => {
     expect(verifyHeaderChain(tamperedSignature, { genesisHash, consensus }).reason).toMatch(/signature/);
   });
 });
+
+describe("Node record anchoring", () => {
+  const dirs: string[] = [];
+  const nodes: Node[] = [];
+  const record = sha256("contract v3, signed 2026-09-25");
+
+  afterEach(async () => {
+    await Promise.all(nodes.splice(0).map((n) => n.stop()));
+    for (const dir of dirs.splice(0)) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  function anchorTx(genesisMiner: { publicKey: string; privateKey: string }, coinbaseTxId: string, data: string): Transaction {
+    const body: UnsignedTransactionBody = {
+      inputs: [{ txId: coinbaseTxId, outputIndex: 0, signature: "", publicKey: genesisMiner.publicKey }],
+      outputs: [{ address: deriveAddress(genesisMiner.publicKey), amount: REWARD - 10n }],
+      timestamp: 1700000000500,
+      fee: 10n,
+      data,
+    };
+    body.inputs[0]!.signature = sign(genesisMiner.privateKey, getSigningPayload(body));
+    return { ...body, id: computeTransactionId(body) };
+  }
+
+  it("indexes a confirmed record with its block, height, block time and confirmations; a pending one is not listed", async () => {
+    const genesisMiner = generateKeyPair();
+    const node = await makeNode("anchor", dirs, deriveAddress(genesisMiner.publicKey));
+    nodes.push(node);
+    const genesis = (await node.getBlockByHeight(0))!;
+    const tx = anchorTx(genesisMiner, genesis.transactions[0]!.id, record);
+    expect(await node.submitTransaction(tx)).toMatchObject({ valid: true });
+    expect(await node.getAnchors(record)).toEqual([]);
+
+    const b1 = await node.mineBlock();
+    expect(await node.getAnchors(record)).toEqual([{ txId: tx.id, height: 1, blockHash: b1.hash, blockTimestamp: b1.header.timestamp, confirmations: 1 }]);
+    await node.mineBlock();
+    expect((await node.getAnchors(record))[0]!.confirmations).toBe(2);
+    expect(await node.getAnchors(sha256("some other document"))).toEqual([]);
+    // The anchor's merkle proof is the ordinary transaction proof.
+    expect((await node.getTransactionProof(tx.id))?.blockHash).toBe(b1.hash);
+  });
+
+  it("a record reaches peers intact and is indexed there too", async () => {
+    const genesisMiner = generateKeyPair();
+    const genesisAddress = deriveAddress(genesisMiner.publicKey);
+    const a = await makeNode("node-a", dirs, genesisAddress);
+    const b = await makeNode("node-b", dirs, genesisAddress);
+    nodes.push(a, b);
+    await Promise.all([once(a.p2pServer, "peer:connected"), a.connectToPeer(`ws://localhost:${b.getBoundPort()}`)]);
+    const genesis = (await a.getBlockByHeight(0))!;
+    const tx = anchorTx(genesisMiner, genesis.transactions[0]!.id, record);
+    await a.submitTransaction(tx);
+    await vi_waitFor(() => b.getMempoolTransactions().some((t) => t.id === tx.id));
+    const a1 = await a.mineBlock();
+    await vi_waitFor(async () => (await b.getTip())?.hash === a1.hash);
+    expect((await b.getAnchors(record)).map((x) => x.blockHash)).toEqual([a1.hash]);
+  });
+
+  it("follows reorgs: an anchor in an abandoned block disappears and returns when re-mined", async () => {
+    const genesisMiner = generateKeyPair();
+    const genesisAddress = deriveAddress(genesisMiner.publicKey);
+    const a = await makeNode("node-a", dirs, genesisAddress);
+    const b = await makeNode("node-b", dirs, genesisAddress);
+    nodes.push(a, b);
+    const genesis = (await a.getBlockByHeight(0))!;
+    const tx = anchorTx(genesisMiner, genesis.transactions[0]!.id, record);
+    await a.submitTransaction(tx);
+    const a1 = await a.mineBlock();
+    expect((await a.getAnchors(record)).map((x) => x.blockHash)).toEqual([a1.hash]);
+
+    await b.mineBlock();
+    const b2 = await b.mineBlock();
+    await Promise.all([once(a.p2pServer, "peer:connected"), a.connectToPeer(`ws://localhost:${b.getBoundPort()}`)]);
+    await vi_waitFor(async () => (await a.getTip())?.hash === b2.hash);
+    expect(await a.getAnchors(record)).toEqual([]);
+
+    const a3 = await a.mineBlock(); // the displaced anchor went back to the mempool
+    expect((await a.getAnchors(record)).map((x) => [x.blockHash, x.height])).toEqual([[a3.hash, 3]]);
+  });
+
+  it("attack: a record swapped after signing (id recomputed to match) is refused and nothing is indexed", async () => {
+    const genesisMiner = generateKeyPair();
+    const node = await makeNode("anchor", dirs, deriveAddress(genesisMiner.publicKey));
+    nodes.push(node);
+    const genesis = (await node.getBlockByHeight(0))!;
+    const honest = anchorTx(genesisMiner, genesis.transactions[0]!.id, record);
+    const forgedRecord = sha256("a document the signer never saw");
+    const { id: _id, ...body } = { ...honest, data: forgedRecord };
+    const forged = { ...body, id: computeTransactionId(body) };
+    const result = await node.submitTransaction(forged);
+    expect(result.valid).toBe(false);
+    expect(result.reason).toMatch(/signature/);
+    await node.mineBlock();
+    expect(await node.getAnchors(forgedRecord)).toEqual([]);
+  });
+
+  it("attack: a record over the size limit is refused by the node", async () => {
+    const genesisMiner = generateKeyPair();
+    const node = await makeNode("anchor", dirs, deriveAddress(genesisMiner.publicKey));
+    nodes.push(node);
+    const genesis = (await node.getBlockByHeight(0))!;
+    const result = await node.submitTransaction(anchorTx(genesisMiner, genesis.transactions[0]!.id, "00".repeat(81)));
+    expect(result.valid).toBe(false);
+    expect(result.reason).toMatch(/data/);
+  });
+});

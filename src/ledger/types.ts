@@ -19,6 +19,12 @@ export interface Transaction {
   outputs: TxOutput[];
   timestamp: number;
   fee: bigint;
+  /**
+   * Record anchored on chain (lowercase hex, 1..MAX_TX_DATA_BYTES bytes),
+   * typically the sha256 of a document. Signed and part of the id; absent
+   * on ordinary payments, which then hash exactly as they always did.
+   */
+  data?: string;
 }
 
 export type UnsignedTransactionBody = Omit<Transaction, "id">;

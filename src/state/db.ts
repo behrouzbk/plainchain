@@ -35,6 +35,8 @@ export interface StateDb {
   peers: Sublevel;
   /** Per-address activity: `<address>:<height>:<txId>` -> amounts received/sent (canonical chain only). */
   addrIndex: Sublevel;
+  /** Anchored records: `<data>:<height>:<txId>` -> block hash + time (canonical chain only). */
+  anchors: Sublevel;
 }
 
 export function openStateDb(location: string): StateDb {
@@ -50,6 +52,7 @@ export function openStateDb(location: string): StateDb {
     txIndex: root.sublevel("txindex", { valueEncoding: "utf8" }),
     peers: root.sublevel("peers", { valueEncoding: "utf8" }),
     addrIndex: root.sublevel("addrindex", { valueEncoding: "utf8" }),
+    anchors: root.sublevel("anchors", { valueEncoding: "utf8" }),
   };
 }
 

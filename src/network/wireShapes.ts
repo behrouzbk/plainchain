@@ -64,7 +64,11 @@ export function parseP2PTransaction(value: unknown, what = "transaction"): Trans
     return { address: output.address, amount: output.amount };
   });
   if (typeof value.fee !== "bigint") fail(`${what}.fee: expected a bigint`);
-  return { id, inputs, outputs, timestamp: integer(value.timestamp, `${what}.timestamp`, 0), fee: value.fee };
+  const tx: Transaction = { id, inputs, outputs, timestamp: integer(value.timestamp, `${what}.timestamp`, 0), fee: value.fee };
+  // Record data is part of the id: dropping it here would make an honest
+  // peer's transaction look forged.
+  if (value.data !== undefined) tx.data = hex(value.data, `${what}.data`);
+  return tx;
 }
 
 /** A block whose claimed hash really is the hash of its header (a claimed hash is never trusted). */

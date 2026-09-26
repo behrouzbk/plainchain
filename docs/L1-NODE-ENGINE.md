@@ -139,13 +139,15 @@ top to bottom.
 ```
 TxOutput     { address, amount: bigint }
 TxInput      { txId, outputIndex, signature, publicKey }
-Transaction  { id, inputs[], outputs[], timestamp, fee: bigint }
+Transaction  { id, inputs[], outputs[], timestamp, fee: bigint, data? }
 BlockHeader  { version, previousHash, merkleRoot, timestamp, difficultyTarget, nonce, height }
 Block        { header, transactions[], hash }
 ```
 
 Every input signs one payload (referenced outpoints + outputs + timestamp +
-fee). A transaction's `id` is the SHA-256 of its full serialisation including
+fee + `data` when present). `data` is an optional record of up to 80 bytes
+of lowercase hex, usually a document's sha256 (see `docs/ANCHORING.md`);
+a transaction without it serialises exactly as before. A transaction's `id` is the SHA-256 of its full serialisation including
 signatures. A block's `hash` is the SHA-256 of its serialised header. An
 address is the SHA-256 of a public key. Money is always a `bigint`.
 
@@ -153,7 +155,8 @@ address is the SHA-256 of a public key. Money is always a `bigint`.
 
 **Transaction** (`ledger/transaction.ts`, `state/utxoSet.ts`): id matches
 content; at least one output; every amount positive; fee non-negative; no
-outpoint referenced twice; every input exists, is owned by the signing key
+outpoint referenced twice; `data`, if present, is 1–80 bytes of lowercase
+hex; every input exists, is owned by the signing key
 (address = hash of the presented public key), and its signature verifies;
 inputs ≥ outputs + fee; coinbase outputs are unspendable for
 `coinbaseMaturity` blocks.
@@ -239,6 +242,7 @@ positional or named params; bigints returned as decimal strings.
 | `getBalance` | `address` | public |
 | `listUnspent` | `address` | public |
 | `listTransactions` | `address, limit` | public |
+| `getAnchors` | `data, limit` | public — confirmed transactions carrying the record, oldest first |
 | `getSupply` | — | public |
 | `getMempool` | — | public |
 | `sendRawTransaction` | `transaction` (wire format) | public — must carry valid signatures |
@@ -324,6 +328,7 @@ external step, with `docs/THREAT-MODEL.md` §8 as the brief.
 | Pluggable consensus (PoA) | | merged | `ConsensusEngine` (`consensus/engine.ts`) behind `validateHeader`, fork choice and `mineBlock`; `PoaEngine`: signed headers (signer in the hash), Clique-style once-per-floor(n/2)+1 rule, in-turn weight; mode + ordered authority set in the rules hash; `--signer-key`, `npm run gen-authority`, `--config` for a chain's own config; SPV verifies signed chains from a trusted authority set. |
 | CI + published image + Kubernetes | | merged | GitHub Actions: typecheck + full suite + build, image build-and-boot, manifests rendered, on every PR; `ghcr.io/behrouzbk/plainchain` published on pushes to main and semver tags (tag must match `package.json`); `k8s/base` StatefulSet mesh (headless peer DNS, per-pod PVC, health probes, non-root) + `k8s/kind` overlay; live-verified on kind with `testnet:check` and a pod restart. |
 | Address-index pruning | | merged | `--addrindex-depth n` keeps exactly the last n canonical blocks of wallet history (pruning rides in the adoption batch as the disconnect path; reorg-safe because deletes are idempotent), `--no-addrindex` keeps none; a changed depth is reconciled at startup (sweep or rebuild from the tx index); `getInfo.addressIndex` tells wallets what history covers and `wallet history` says so. |
+| Record anchoring | | in review | Optional `data` field on transactions (≤ 80 bytes, signed, in the id; `RULES_VERSION` 5); reorg-safe `anchors` index; `getAnchors` RPC; `wallet anchor` / `find-anchor` (re-hashes the transaction, checks the merkle proof against SPV headers); `docs/ANCHORING.md`; threat model §4.8. |
 | External security review | — | prep in review; engagement pending | `docs/REVIEW-BRIEF.md` (reviewer package), `SECURITY.md`, findings issue template; the self-audit that preceded it found and fixed three P2P-boundary bugs (threat model F6–F8: claimed-hash poisoning, PoA signature outside the block hash, no wire type checks). |
 
 ## 5. How to run

@@ -144,6 +144,23 @@ headers alone, so header-first sync and the light client apply them too.
 | P4 | **Mixed-mode network** (a proof-of-work node and a proof-of-authority node, or two authority sets, on the same genesis) | mode and the ordered authority set are in the handshake `rulesHash` (`RULES_VERSION` 3); such peers refuse each other instead of forking | `engine: "rulesHash covers the mode and the ordered authority set, so mixed-mode or differently governed peers refuse each other"`; `node: "refuses to peer with a proof-of-work node, and with a proof-of-authority node whose authority set differs"` | None known |
 | P5 | **Signer key theft** (the key file on an authority's host) | `--signer-key` is a plain file the operator protects like a TLS key (mode 0600 from `gen-authority`); the node derives the public key from it, so a wrong or swapped file is refused at startup rather than silently signing as nobody | `signerKey` tests; `node: "a node without a signer key follows the chain but cannot produce blocks; a key outside the set is refused at startup"` | **R21** The key is not encrypted at rest; a stolen key is a stolen authority until the set is rotated (a config change on every node) |
 
+### 4.8 Record anchoring (A1, A6)
+
+A transaction may carry up to 80 bytes of record data (`Transaction.data`,
+usually the sha256 of a document). The node indexes it (`anchors`
+sublevel) and answers `getAnchors`; `wallet find-anchor` proves an anchor
+without trusting the node. `RULES_VERSION` 5.
+
+| # | Threat | M | T | R |
+|---|---|---|---|---|
+| D1 | **Chain used as bulk storage** (large data in many transactions) | `ledger/transaction.ts#validateTransactionStructure`: data is 1..`MAX_TX_DATA_BYTES` (80) bytes, on the mempool *and* block path; block limits (C13) bound the total | `ledger/transaction: "attack: a record one byte over the limit is refused (no free bulk storage)"`; `node: "attack: a record over the size limit is refused by the node"` | **R22** Anyone with coins can write 80 bytes of their choice, and nothing on chain can be deleted. The fee is flat per transaction (as R8). On a private ledger, whoever holds coins decides who can anchor |
+| D2 | **Record swapped after signing** (keep the signature, change the data, recompute the id) | data is part of `getSigningPayload` and of the transaction id | `ledger/transaction: "attack: swapping the record after signing breaks the signature"`; `node: "attack: a record swapped after signing (id recomputed to match) is refused and nothing is indexed"` | None known |
+| D3 | **Two spellings of one record** (upper- and lower-case hex) so a lookup misses an anchor | only lowercase hex is valid on chain; `getAnchors` and the CLI lower-case what they are given | `ledger/transaction: "attack: uppercase hex is refused, so one record cannot be anchored under two spellings"`; `rpc/server: "getAnchors finds a record sent with sendRawTransaction once it is mined, and accepts the record in upper case"` | None known |
+| D4 | **Node lies about an anchor** (points the record at an unrelated transaction, a block it doesn't have, or a fork) | `wallet find-anchor` fetches the block, recomputes the transaction id from its content, checks the transaction's data equals the record, then checks the merkle proof against a header on the SPV-verified chain (W3, W4) | `cli/wallet: "attack: a node that points the record at an unrelated confirmed transaction is caught"`; `cli/wallet: "anchor --file sends the file's sha256 as a record; find-anchor proves it…"` | **R23** A node can *hide* an anchor ("not anchored") or show a later one instead of the earliest; SPV cannot prove absence. For a disputed record, ask more than one node |
+| D5 | **Record dropped in transit** (a peer strips the field, so an honest transaction looks forged and its sender is penalized) | `network/wireShapes.ts#parseP2PTransaction` and `ledger/serialize.ts` carry and type-check `data` | `protocol: "a transaction's record data survives the trip…"`; `node: "a record reaches peers intact and is indexed there too"` | None known |
+| D6 | **Anchor in an abandoned block still reported** after a reorg | the anchor index is written in the same atomic adoption batch as the tx index: added on connect, removed on disconnect | `node: "follows reorgs: an anchor in an abandoned block disappears and returns when re-mined"` | None known |
+| D7 | **Backdated anchor**: the block producer sets an early block time | block time must be later than the parent's and at most `maxFutureDriftMs` ahead (C8) | `blockValidator: "rejects timestamps not after the parent's, or too far in the future"` | **R24** A block's time can be earlier than the real time by up to the gap since its parent (a miner, or a proof-of-authority signer, picks it). "Existed by block time" is as strong as the producers are honest; later blocks confirm it is not rewritten |
+
 ## 5. What is deliberately public
 
 Balances, UTXOs, blocks, headers, the mempool, `/health`, `/metrics` and
@@ -151,6 +168,12 @@ Balances, UTXOs, blocks, headers, the mempool, `/health`, `/metrics` and
 confidentiality; `sendRawTransaction` carries its own authorization (the
 signatures). The bearer token protects the one thing that costs the
 operator something: `mine`.
+
+Anchored records are public too. A record is usually a hash, which hides
+the document only if the document can't be guessed: the hash of "yes",
+of a short ID or of a known template can be found by trying candidates.
+Add a random salt to such documents before anchoring (see
+`docs/ANCHORING.md`).
 
 ## 6. Accepted risks (inherent to the design)
 

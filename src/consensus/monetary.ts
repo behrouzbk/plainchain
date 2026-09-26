@@ -23,9 +23,10 @@ export interface MonetaryPolicy {
  * configs. History: 1 initial; 2 retarget window off-by-one fix (#27);
  * 3 consensus engines -- mode + authority set join the hash, and a header
  * may carry a signer (#37); 4 the proof-of-authority signature joins the
- * block hash (self-audit finding F7).
+ * block hash (self-audit finding F7); 5 transactions may carry up to 80
+ * bytes of record data (anchoring), which old code would drop or refuse.
  */
-export const RULES_VERSION = 4;
+export const RULES_VERSION = 5;
 
 /** The consensus parameters, besides the emission schedule, that decide which blocks are valid. */
 export interface ConsensusRules {

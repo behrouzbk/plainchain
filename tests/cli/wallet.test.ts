@@ -1,4 +1,6 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -681,6 +683,99 @@ describe("wallet CLI (end-to-end over JSON-RPC)", () => {
     expect(history.out.trim().split("\n")).toHaveLength(2);
     expect(history.out).toMatch(/height=4/);
     expect(history.err).toMatch(/heights 3 and above.*last 2 blocks/);
+  });
+
+  describe("record anchoring", () => {
+    const docPath = () => join(dir, "contract.pdf");
+    const docHash = () => createHash("sha256").update(readFileSync(docPath())).digest("hex");
+
+    async function fundedAlice(): Promise<{ n: Node; genesisHash: string }> {
+      await cli(["create", "--wallet", walletPath()], { passphrase: PASS });
+      const n = await startNode(aliceRaw());
+      await n.mineBlock();
+      writeFileSync(docPath(), Buffer.from([0x25, 0x50, 0x44, 0x46, 0x00, 0xff, 0x10, 0x0a])); // binary content, hashed as bytes
+      return { n, genesisHash: (await n.getBlockByHeight(0))!.hash };
+    }
+
+    it("anchor --file sends the file's sha256 as a record; find-anchor proves it (headers + merkle proof + the tx really carries it)", async () => {
+      const { n, genesisHash } = await fundedAlice();
+      const sent = await cli(["anchor", "--wallet", walletPath(), "--file", docPath()], { passphrase: PASS });
+      expect(sent.code, sent.err).toBe(0);
+      expect(sent.out).toContain(`record: ${docHash()}`);
+      const txId = /txId:\s*([0-9a-f]{64})/.exec(sent.out)![1]!;
+      expect(n.getMempoolTransactions().find((t) => t.id === txId)?.data).toBe(docHash());
+
+      const pending = await cli(["find-anchor", "--file", docPath(), "--genesis-hash", genesisHash]);
+      expect(pending.code).toBe(1);
+      expect(pending.err).toMatch(/not anchored/i);
+
+      const block = await n.mineBlock();
+      await n.mineBlock();
+      const found = await cli(["find-anchor", "--file", docPath(), "--genesis-hash", genesisHash]);
+      expect(found.code, found.err).toBe(0);
+      expect(found.out).toContain(`record: ${docHash()}`);
+      expect(found.out).toContain(`anchored in block ${block.hash} at height 2`);
+      expect(found.out).toContain(new Date(block.header.timestamp).toISOString());
+      expect(found.out).toMatch(/confirmations:\s*2\b/);
+      expect(found.out).toMatch(/transaction carries the record/i);
+      expect(found.out).toMatch(/inclusion proof valid/i);
+
+      // --hash takes the digest directly (any case), e.g. computed elsewhere.
+      const byHash = await cli(["find-anchor", "--hash", docHash().toUpperCase(), "--genesis-hash", genesisHash]);
+      expect(byHash.code).toBe(0);
+    });
+
+    it("a record nobody anchored is reported as not anchored (exit 1)", async () => {
+      const { genesisHash } = await fundedAlice();
+      const res = await cli(["find-anchor", "--hash", "cd".repeat(32), "--genesis-hash", genesisHash]);
+      expect(res.code).toBe(1);
+      expect(res.err).toMatch(/not anchored/i);
+    });
+
+    it("refuses a bad record before asking for the passphrase: not hex, too long, no source, or two sources", async () => {
+      await fundedAlice();
+      for (const args of [["--hash", "xyz"], ["--hash", "00".repeat(81)], [], ["--hash", "ab", "--file", docPath()], ["--file", join(dir, "missing.pdf")]]) {
+        const res = await cli(["anchor", "--wallet", walletPath(), ...args]); // no passphrase: a prompt would throw
+        expect(res.code, args.join(" ")).toBe(2);
+      }
+    });
+
+    it("a watch-only wallet can look a record up but cannot anchor one", async () => {
+      await fundedAlice();
+      const watchPath = join(dir, "watch.json");
+      await cli(["watch-only", "--wallet", walletPath(), "--out", watchPath]);
+      const res = await cli(["anchor", "--wallet", watchPath, "--file", docPath()]);
+      expect(res.code).toBe(2);
+      expect(res.err).toMatch(/watch-only/i);
+    });
+
+    it("attack: a node that points the record at an unrelated confirmed transaction is caught", async () => {
+      const { n, genesisHash } = await fundedAlice();
+      const block1 = (await n.getBlockByHeight(1))!;
+      // A proxy that answers getAnchors with a real, provable transaction
+      // (block 1's coinbase) that does not carry the record.
+      const liar = createServer((req, res) => {
+        let body = "";
+        req.on("data", (c) => (body += c));
+        req.on("end", async () => {
+          const call = JSON.parse(body) as { method: string; id: number };
+          const reply = call.method === "getAnchors"
+            ? { jsonrpc: "2.0", id: call.id, result: [{ txId: block1.transactions[0]!.id, height: 1, blockHash: block1.hash, blockTimestamp: block1.header.timestamp, confirmations: 1 }] }
+            : await (await fetch(`${rpcUrl}/rpc`, { method: "POST", headers: { "Content-Type": "application/json" }, body })).json();
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify(reply));
+        });
+      });
+      await new Promise<void>((resolve) => liar.listen(0, "127.0.0.1", resolve));
+      try {
+        const port = (liar.address() as { port: number }).port;
+        const res = await cli(["find-anchor", "--file", docPath(), "--genesis-hash", genesisHash], { rpc: `http://127.0.0.1:${port}` });
+        expect(res.code).toBe(1);
+        expect(res.err).toMatch(/does not carry the record/i);
+      } finally {
+        await new Promise<void>((resolve) => liar.close(() => resolve()));
+      }
+    });
   });
 
   it("prints usage for an unknown or missing command", async () => {

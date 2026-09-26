@@ -7,6 +7,7 @@ import {
   serializeTransaction,
   parseWireChainHeader,
   parseWireHeader,
+  parseWireTransaction,
   WireShapeError,
 } from "../../src/ledger/serialize.js";
 import type { Transaction } from "../../src/ledger/types.js";
@@ -41,6 +42,35 @@ describe("transaction serialize/deserialize round-trip", () => {
       fee: 0n,
     };
     expect(deserializeTransaction(serializeTransaction(tx))).toEqual(tx);
+  });
+});
+
+describe("record data on the wire", () => {
+  const tx: Transaction = {
+    id: "ef".repeat(32),
+    inputs: [{ txId: "01".repeat(32), outputIndex: 0, signature: "aa", publicKey: "bb" }],
+    outputs: [{ address: "alice", amount: 5n }],
+    timestamp: 1700000000000,
+    fee: 1n,
+  };
+
+  it("round-trips data, and emits no data key for a transaction without it (block sizes and stored blocks stay the same)", () => {
+    const withData = { ...tx, data: "ab".repeat(32) };
+    expect(deserializeTransaction(serializeTransaction(withData))).toEqual(withData);
+    expect(serializeTransaction(tx)).not.toContain("data");
+    expect("data" in deserializeTransaction(serializeTransaction(tx))).toBe(false);
+  });
+
+  it("keeps data through a stored block", () => {
+    const genesis = createGenesisBlock({ timestamp: 1700000000000, difficultyTarget: "f".repeat(64), reward: 5n, genesisAddress: "g" });
+    const block = { ...genesis, transactions: [...genesis.transactions, { ...tx, data: "cd".repeat(4) }] };
+    expect(deserializeBlock(serializeBlock(block)).transactions[1]!.data).toBe("cd".repeat(4));
+  });
+
+  it("parseWireTransaction (the RPC boundary) refuses data that is not a string", () => {
+    const wire = JSON.parse(serializeTransaction(tx)) as Record<string, unknown>;
+    expect(() => parseWireTransaction({ ...wire, data: 42 })).toThrow(/data/);
+    expect(parseWireTransaction({ ...wire, data: "abcd" }).data).toBe("abcd");
   });
 });
 
