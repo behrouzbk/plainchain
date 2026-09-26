@@ -10,7 +10,7 @@ You need Node.js 20+ and the repository:
 
 ```bash
 git clone https://github.com/behrouzbk/plainchain.git && cd plainchain && npm ci
-npm test        # 576 tests, ~3 minutes: everything you are about to read is checked here
+npm test        # 619 tests, ~3 minutes: everything you are about to read is checked here
 ```
 
 Run a single test file with `npx vitest run tests/<module>/<file>.test.ts`,
@@ -281,7 +281,7 @@ payment with the light client — every command with its expected output.
 
 - `docs/L1-NODE-ENGINE.md` — the full architecture document, including
   every consensus rule as enforced and the P2P protocol.
-- `docs/THREAT-MODEL.md` — about 55 ways to attack a node, each with the
+- `docs/THREAT-MODEL.md` — about 60 ways to attack a node, each with the
   code that stops it and the test that proves it. The best single map of
   the codebase.
 - `CONTRIBUTING.md` — the engineering conventions: layering, test-first,
