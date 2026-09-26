@@ -9,14 +9,17 @@ its code, and quotes the test that shows the attack failing.*
 ## 1. What this is
 
 A standalone Layer 1 blockchain node engine in TypeScript/Node.js
-(≈17 000 lines under `src/`, three runtime dependencies: `express`,
+(≈9 000 lines under `src/` plus ≈10 000 lines of tests, three runtime
+dependencies: `express`,
 `level`, `ws`). Everything cryptographic — hashing, Ed25519 signatures,
 Merkle trees, key derivation (SLIP-0010, BIP-39), TLS certificate
 generation — is built on Node's `node:crypto`; there is no blockchain SDK
 in the dependency tree. It runs proof of work by default and proof of
 authority for consortium deployments, with a UTXO ledger, header-first
-sync, replace-by-fee mempool, an SPV light client in the wallet, JSON-RPC
-over optional TLS, Docker and Kubernetes packaging.
+sync, replace-by-fee mempool, an SPV light client in the wallet, record
+anchoring (a transaction can carry up to 80 bytes of data, usually a
+document's hash), JSON-RPC over optional TLS, Docker and Kubernetes
+packaging.
 
 Intended deployments: private and consortium ledgers, education, protocol
 prototyping. There is no public token. See `L1-NODE-ENGINE.md` for the
@@ -26,8 +29,8 @@ together with a test showing the attack it prevents).
 
 ## 2. Scope
 
-- **Commit**: tag `v0.1.1` (`54d0f5d`) unless the engagement names a later
-  tag; the reviewer pins it in the report. `CHANGELOG.md` lists what
+- **Commit**: tag `v0.1.2` (`301b929`, consensus rules version 5) unless
+  the engagement names a later tag; the reviewer pins it in the report. `CHANGELOG.md` lists what
   changes between tags, so a fix made during the review is visible.
 - **In scope**: everything under `src/` and `scripts/`, the wire protocol,
   the RPC surface, the wallet and light client, `config/default.json`,
@@ -46,13 +49,14 @@ together with a test showing the attack it prevents).
 
 ```bash
 git clone <repo> && cd plainchain && npm ci
-npm test                       # 576 tests, ~3 min; nothing CI-specific
+npm test                       # 619 tests, ~3 min; nothing CI-specific
 npm run simulate               # three real processes: mine, propagate, agree
 docker compose up --build -d && npm run testnet:check && docker compose down -v
 ```
 
 `docs/HANDS-ON-TESTING.md` walks every feature by hand with expected output
-(wallet, RBF, SPV, TLS, metrics, proof of authority). `k8s/README.md` runs
+(wallet, RBF, SPV, TLS, metrics, proof of authority); `docs/ANCHORING.md`
+does the same for record anchoring. `k8s/README.md` runs
 the mesh on a local kind cluster.
 
 ## 4. Where the risk is, in priority order
@@ -60,14 +64,15 @@ the mesh on a local kind cluster.
 | # | Area | Code | Why it is first |
 |---|---|---|---|
 | 1 | **Consensus rules** — what makes a block valid | `consensus/blockValidator.ts`, `ledger/transaction.ts`, `state/utxoSet.ts`, `consensus/monetary.ts`, `consensus/difficulty.ts` | An error here is theft or inflation. ~800 lines total; every rule has an `attack:` test. |
-| 2 | **Proof of authority** (newest, never externally reviewed) | `consensus/engine.ts`, `ledger/block.ts#computeBlockHash`/`computeSealHash`, `node/node.ts#recentSignersFor` | Signed headers: signer and signature are inside the block hash, the signature is over the seal hash. Clique-style once-per-⌊n/2⌋+1 rule, in-turn weight 2. We want the turn rule and fork choice attacked (equivocation, out-of-turn floods, a stalled majority). |
-| 3 | **Fork choice and reorgs** | `node/node.ts#handleIncomingBlock`, `#adoptBlock`, `#planReorg`, `#handleHeaders`, `consensus/forkChoice.ts` | Header-first sync decides "heavier" before downloading bodies; adoption is one atomic LevelDB batch with undo records. Checkpoints bound reorg depth. |
-| 4 | **P2P boundary** | `network/protocol.ts#decodeMessage`, `network/wireShapes.ts`, `network/p2pServer.ts`, `network/reputation.ts` | Every payload is type-checked and canonicalized before a handler sees it; a block's claimed hash is recomputed. Self-audit found three boundary bugs here (§6) — look for a fourth. |
-| 5 | **Mempool / RBF** | `mempool/mempool.ts` | Replacement must outbid the sum of conflicts plus `minFee`; at most `maxReplacements` evictions. |
-| 6 | **Light client** | `wallet/spv.ts`, `wallet/headerStore.ts`, `cli/wallet.ts#syncVerifiedHeaders` | Verifies PoW/PoA headers from a trusted genesis (and authority set); refuses lighter forks; the header cache is re-verified on load. |
-| 7 | **RPC** | `rpc/jsonRpc.ts`, `rpc/server.ts`, `rpc/auth.ts`, `rpc/rateLimit.ts`, `rpc/tls.ts` | Bearer token for `mine`, per-client rate limit with proxy hop counting, 1 MB body cap, hand-written X.509 encoder. |
-| 8 | **Wallet keys** | `wallet/keystore.ts`, `wallet/hd.ts`, `wallet/mnemonic.ts`, `node/signerKey.ts` | scrypt→AES-GCM keystore, SLIP-0010, BIP-39 (all 24 reference vectors), watch-only files. |
-| 9 | **Operations** | `node/settings.ts`, `Dockerfile`, `k8s/`, `.github/workflows/` | Secure defaults (loopback RPC, TLS or explicit opt-in), non-root image, capabilities dropped. |
+| 2 | **Proof of authority** (never externally reviewed) | `consensus/engine.ts`, `ledger/block.ts#computeBlockHash`/`computeSealHash`, `node/node.ts#recentSignersFor` | Signed headers: signer and signature are inside the block hash, the signature is over the seal hash. Clique-style once-per-⌊n/2⌋+1 rule, in-turn weight 2. We want the turn rule and fork choice attacked (equivocation, out-of-turn floods, a stalled majority). |
+| 3 | **Record anchoring** (newest: v0.1.2) | `ledger/transaction.ts` (`data` in the signing payload and id, `MAX_TX_DATA_BYTES`), `ledger/serialize.ts`, `network/wireShapes.ts#parseP2PTransaction`, `node/node.ts#connectBlock`/`#disconnectBlock` (anchor index), `#anchorRecord`, `rpc/jsonRpc.ts` (`getAnchors`, `anchorRecord`), `cli/wallet.ts` (`find-anchor`) | A consensus change: `data` is appended to the serialization only when present, so older ids are unchanged. `anchorRecord` spends the operator's coins from a hot key under the chain lock. `find-anchor` must not believe the node. Threat model §4.8. |
+| 4 | **Fork choice and reorgs** | `node/node.ts#handleIncomingBlock`, `#adoptBlock`, `#planReorg`, `#handleHeaders`, `consensus/forkChoice.ts` | Header-first sync decides "heavier" before downloading bodies; adoption is one atomic LevelDB batch with undo records. Checkpoints bound reorg depth. |
+| 5 | **P2P boundary** | `network/protocol.ts#decodeMessage`, `network/wireShapes.ts`, `network/p2pServer.ts`, `network/reputation.ts` | Every payload is type-checked and canonicalized before a handler sees it; a block's claimed hash is recomputed. Self-audit found three boundary bugs here (§6) — look for a fourth. |
+| 6 | **Mempool / RBF** | `mempool/mempool.ts` | Replacement must outbid the sum of conflicts plus `minFee`; at most `maxReplacements` evictions. |
+| 7 | **Light client** | `wallet/spv.ts`, `wallet/headerStore.ts`, `cli/wallet.ts#syncVerifiedHeaders` | Verifies PoW/PoA headers from a trusted genesis (and authority set); refuses lighter forks; the header cache is re-verified on load. |
+| 8 | **RPC** | `rpc/jsonRpc.ts`, `rpc/server.ts`, `rpc/auth.ts`, `rpc/rateLimit.ts`, `rpc/tls.ts` | Bearer token for `mine` and `anchorRecord`, per-client rate limit with proxy hop counting, 1 MB body cap, hand-written X.509 encoder. |
+| 9 | **Wallet keys** | `wallet/keystore.ts`, `wallet/hd.ts`, `wallet/mnemonic.ts`, `node/signerKey.ts` | scrypt→AES-GCM keystore, SLIP-0010, BIP-39 (all 24 reference vectors), watch-only files. |
+| 10 | **Operations** | `node/settings.ts`, `Dockerfile`, `k8s/`, `.github/workflows/` | Secure defaults (loopback RPC, TLS or explicit opt-in), non-root image, capabilities dropped. |
 
 ## 5. What we most want challenged
 
@@ -88,6 +93,11 @@ the mesh on a local kind cluster.
    responses (the wallet trusts nothing but the genesis hash, the authority
    set and proof of work — verify that holds).
 8. The hand-written X.509/DER encoder and the keystore format.
+9. Record anchoring: two different transactions with the same id or the
+   same signing payload now that `data` is optional; a record that
+   `wallet find-anchor` accepts although the node never anchored it; a way
+   to make `anchorRecord` spend more than one minimum fee per distinct
+   record, or pay twice for one.
 
 ## 6. What has already been found and fixed
 
@@ -106,7 +116,7 @@ attack tests written before the fix and are named in §4.2/§4.7.
   existing `attack:` convention; if it passes without a code change, that
   is a finding, and the test is the reproduction.
 - **Use the seams**: `Node` takes an injectable `miner`, `logger`,
-  `metrics`, `signerKey`; tests spin up real in-process nodes on ephemeral
+  `metrics`, `signerKey`, `anchorKey`; tests spin up real in-process nodes on ephemeral
   ports and a raw `P2PServer` "injector" that speaks the protocol without
   the rules (`tests/node/node.test.ts#makeInjector`).
 - **Everything is observable**: `GET /metrics` (Prometheus), `GET /health`,
