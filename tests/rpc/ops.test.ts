@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { packageVersion } from "../../src/config/index.js";
 import { generateKeyPair } from "../../src/crypto/keypair.js";
 import { deriveAddress } from "../../src/ledger/address.js";
 import { Node } from "../../src/node/node.js";
@@ -106,7 +107,7 @@ describe("operator endpoints", () => {
     expect(s.get("l1_orphan_blocks")).toBe(0);
     expect(s.get("process_resident_memory_bytes")).toBeGreaterThan(0);
     expect(s.get("process_uptime_seconds")).toBeGreaterThanOrEqual(0);
-    expect(s.get('l1_build_info{network_id="test-net",node_id="ops-node",version="0.1.1"}')).toBe(1);
+    expect(s.get(`l1_build_info{network_id="test-net",node_id="ops-node",version="${packageVersion()}"}`)).toBe(1);
   });
 
   it("counts JSON-RPC calls by method and outcome", async () => {
