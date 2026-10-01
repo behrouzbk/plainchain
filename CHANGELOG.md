@@ -4,6 +4,20 @@ All notable changes, newest first. Consensus-affecting changes name the
 `RULES_VERSION` they introduce: nodes on different rule versions refuse to
 peer, so such a change is a coordinated upgrade for every node of a chain.
 
+## Unreleased
+
+No consensus change; nodes of any v0.1.2 chain keep peering.
+
+- **Windows: opening a database no longer fails at random.** Creating a
+  LevelDB database renames a temp file to `CURRENT`; on Windows an
+  antivirus scanning the new file can hold it for a moment, and the rename
+  failed with "Access is denied". The node reported it only as "Database
+  is not open", and on a machine with real-time scanning `npm test` often
+  failed one random test. The open is now retried on
+  that error for up to about 1.5 s (any other error is not retried), and a
+  node that still can't open its data directory says why at startup.
+  Three new tests (622 in total).
+
 ## v0.1.2 — 2026-09-26
 
 Rules version **5** (a coordinated upgrade: every node of a chain must run
