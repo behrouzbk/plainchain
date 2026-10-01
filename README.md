@@ -12,7 +12,7 @@ proof-of-authority chain for a group of companies that want a shared ledger
 without a public token. About 9,000 lines under `src/`, 622 tests — a large
 share of them explicit attacks that the rules are shown to stop.
 
-**Status:** v0.1.2. Feature-complete for private and consortium use;
+**Status:** v0.1.3. Feature-complete for private and consortium use;
 internally audited with a public threat model; **no external security
 review yet** (see [Security](#security)).
 
