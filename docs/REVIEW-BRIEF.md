@@ -49,7 +49,7 @@ together with a test showing the attack it prevents).
 
 ```bash
 git clone <repo> && cd plainchain && npm ci
-npm test                       # 619 tests, ~3 min; nothing CI-specific
+npm test                       # 622 tests, ~3 min; nothing CI-specific
 npm run simulate               # three real processes: mine, propagate, agree
 docker compose up --build -d && npm run testnet:check && docker compose down -v
 ```

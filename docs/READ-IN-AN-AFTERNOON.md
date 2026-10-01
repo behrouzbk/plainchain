@@ -10,7 +10,7 @@ You need Node.js 20+ and the repository:
 
 ```bash
 git clone https://github.com/behrouzbk/plainchain.git && cd plainchain && npm ci
-npm test        # 619 tests, ~3 minutes: everything you are about to read is checked here
+npm test        # 622 tests, ~3 minutes: everything you are about to read is checked here
 ```
 
 Run a single test file with `npx vitest run tests/<module>/<file>.test.ts`,

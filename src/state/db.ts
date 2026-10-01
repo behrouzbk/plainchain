@@ -39,8 +39,46 @@ export interface StateDb {
   anchors: Sublevel;
 }
 
+/**
+ * Opening a new LevelDB writes a temp file and renames it to CURRENT. On
+ * Windows another program (typically an antivirus scanning the new file)
+ * can hold it for a moment, and the rename fails with "Access is denied".
+ * Those failures are worth retrying; anything else (corruption, a bad
+ * path, a second process holding the LOCK) is not.
+ */
+const TRANSIENT_OPEN_ERROR = /Access is denied|being used by another process/i;
+
+/** Waits before each retry; about 1.5 s in total before the real error is thrown. */
+const OPEN_RETRY_DELAYS_MS = [25, 50, 100, 200, 400, 800] as const;
+
+export async function retryTransientOpen(
+  open: () => Promise<void>,
+  delaysMs: readonly number[] = OPEN_RETRY_DELAYS_MS,
+  sleep: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+): Promise<void> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await open();
+    } catch (err) {
+      const delay = delaysMs[attempt];
+      if (delay === undefined || !TRANSIENT_OPEN_ERROR.test(String((err as Error)?.message))) throw err;
+      await sleep(delay);
+    }
+  }
+}
+
+/** The implementation hook abstract-level calls inside `open()`. */
+interface OpenHook {
+  _open(options: unknown): Promise<void>;
+}
+
 export function openStateDb(location: string): StateDb {
   const root = new Level<string, string>(location, { valueEncoding: "utf8" });
+  // The deferred open starts on the next microtask, so the hook is in place
+  // before it runs. Operations queued while the database opens just wait
+  // longer instead of failing with "Database is not open".
+  const openOnce = (Level.prototype as unknown as OpenHook)._open;
+  (root as unknown as OpenHook)._open = (options) => retryTransientOpen(() => openOnce.call(root, options));
 
   return {
     root,

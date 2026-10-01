@@ -415,6 +415,11 @@ export class Node {
 
   async start(): Promise<void> {
     this.db = openStateDb(this.options.dataDir);
+    // Wait for the open here so a failure names its real cause; operations
+    // queued behind a failed open only report "Database is not open".
+    await this.db.root.open().catch((err: Error & { cause?: Error }) => {
+      throw new Error(`cannot open the database in ${this.options.dataDir}: ${err.cause?.message ?? err.message}`, { cause: err });
+    });
     this.utxoSet = new UtxoSet(this.db.utxo, this.options.consensus.coinbaseMaturity);
     this.chainState = new ChainState(this.db.blocks, this.db.meta, this.db.undo, this.db.headers, this.db.txIndex, this.db.addrIndex, this.db.anchors);
     this.mempool = new Mempool(this.utxoSet, this.options.mempool.maxSize, this.options.mempool.minFee, {
