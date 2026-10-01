@@ -4,7 +4,7 @@ All notable changes, newest first. Consensus-affecting changes name the
 `RULES_VERSION` they introduce: nodes on different rule versions refuse to
 peer, so such a change is a coordinated upgrade for every node of a chain.
 
-## Unreleased
+## v0.1.3 — 2026-10-01
 
 No consensus change; nodes of any v0.1.2 chain keep peering.
 
