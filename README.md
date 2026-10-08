@@ -2,6 +2,7 @@
 
 A complete Layer 1 blockchain node, small enough to read in an afternoon.
 
+Built and maintained by [Axieo Technologies Inc.](https://axieo.ca), Toronto.
 Formerly `l1-node-engine`.
 
 Written from scratch in TypeScript on Node.js with **no blockchain SDKs**:
@@ -115,6 +116,16 @@ has, treat this as pre-audit software and do not put value you cannot
 afford to lose on a chain built with it.
 
 Report a vulnerability privately per [SECURITY.md](SECURITY.md).
+
+## Course, training and services
+
+PlainChain is built by [Axieo Technologies Inc.](https://axieo.ca)
+
+- **The course:** six modules that remove real functions from this node
+  and have you write them back, with its tests as the judge. See
+  [axieo.ca/services#training](https://axieo.ca/services#training).
+- **Team workshops, private ledger pilots and architecture reviews:**
+  [axieo.ca](https://axieo.ca) or info@axieo.ca.
 
 ## Licence
 
